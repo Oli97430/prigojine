@@ -18,9 +18,20 @@ Interface web locale, en français, testée sous Windows 11.
 
 ## Démarrer
 
-### Version portable (Windows 10/11, 64 bits)
+### Installateur (Windows 10/11, 64 bits) — recommandé
 
-Télécharge `Prigojine-portable.zip` dans les [Releases](../../releases), décompresse, double-clique sur **`Prigojine.exe`**. Node.js et adb sont inclus ; rien à installer.
+Télécharge **`Installer-Prigojine.exe`** dans les [Releases](../../releases) et lance-le. Il installe :
+
+- **Prigojine** (inclus dans l'installateur) ;
+- les **composants Android** : SDK, émulateur et image Android 16, téléchargés depuis les serveurs de Google après acceptation de leur licence (≈ 2,4 Go, ignorés s'ils sont déjà présents) ;
+- **ffmpeg** pour la vidéo fluide, téléchargé depuis les builds Windows officielles (gyan.dev) ;
+- **2 émulateurs légers** prêts à l'emploi (un téléphone, une tablette) et des raccourcis.
+
+Chaque téléchargement est vérifié par somme de contrôle. Désinstallation : Paramètres Windows → Applications → Prigojine (le SDK Android et les émulateurs sont conservés).
+
+### Version portable
+
+`Prigojine-portable.zip` (dans les Releases) : décompresse et double-clique sur **`Prigojine.exe`**. Node.js et adb sont inclus ; pour les émulateurs et la vidéo fluide, installe Android Studio et ffmpeg toi-même (ou utilise l'installateur).
 
 ### Depuis les sources
 
@@ -30,7 +41,7 @@ npm start
 ```
 
 La page s'ouvre dans le navigateur. Sous Windows, tu peux aussi double-cliquer sur `Lancer-Prigojine.bat`.
-Pour fabriquer la version portable : `npm run portable` (ou `Construire-portable.bat`).
+Pour fabriquer la version portable : `npm run portable` (ou `Construire-portable.bat`) ; l'installateur : `npm run installer`.
 
 ### Prérequis selon les fonctions
 

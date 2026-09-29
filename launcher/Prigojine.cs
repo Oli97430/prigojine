@@ -57,7 +57,8 @@ static class Prigojine
 		string bundled = Path.Combine(Base, "android");
 		if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ANDROID_HOME")) && !Directory.Exists(Path.Combine(sdk, "platform-tools")))
 			psi.EnvironmentVariables["ANDROID_HOME"] = bundled;
-		psi.EnvironmentVariables["PATH"] = Path.Combine(bundled, "platform-tools") + ";" + Path.Combine(Base, "runtime") + ";" + Environment.GetEnvironmentVariable("PATH");
+		// ffmpeg installé par l'installateur (tools\ffmpeg) pour la vidéo fluide
+		psi.EnvironmentVariables["PATH"] = Path.Combine(bundled, "platform-tools") + ";" + Path.Combine(Base, "runtime") + ";" + Path.Combine(Base, "tools", "ffmpeg") + ";" + Environment.GetEnvironmentVariable("PATH");
 		psi.EnvironmentVariables["PORT"] = PORT.ToString();
 
 		log = new StreamWriter(Path.Combine(Base, "prigojine.log"), false) { AutoFlush = true };
