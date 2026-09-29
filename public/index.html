@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prigojine</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="grain"></div>
+
+<header class="top">
+	<div class="brand">
+		<span class="brand-mark"><i></i><i></i><i></i></span>
+		<div>
+			<h1>Prigo<em>jine</em></h1>
+			<p class="mono dim">banc de contrôle · android · ios</p>
+		</div>
+	</div>
+	<div class="device-pick">
+		<label class="mono dim" for="device">APPAREIL ACTIF</label>
+		<select id="device"></select>
+		<button class="btn ghost icon" id="refreshDevices" title="Rechercher les appareils">⟳</button>
+		<label class="switch mono" title="Répète chaque action sur tous les appareils cochés « synchro »"><input type="checkbox" id="syncAll"><span></span>TOUT SYNCHRO</label>
+	</div>
+	<div class="status mono" id="status">
+		<span class="led" id="led"></span><span id="statusText">connexion…</span>
+	</div>
+</header>
+
+<main class="bench">
+	<!-- Colonne gauche : télémétrie + touches -->
+	<aside class="rail">
+		<section class="card reveal" style="--d:1">
+			<h2>Télémétrie</h2>
+			<dl class="tele mono">
+				<dt>Modèle</dt><dd id="tModel">—</dd>
+				<dt>Système</dt><dd id="tOs">—</dd>
+				<dt>Type</dt><dd id="tType">—</dd>
+				<dt>Écran</dt><dd id="tSize">—</dd>
+				<dt>Orientation</dt><dd id="tOrient">—</dd>
+				<dt>Appli active</dt><dd id="tFg">—</dd>
+			</dl>
+			<button class="btn ghost small" id="refreshTele">Actualiser</button>
+		</section>
+
+		<section class="card reveal" style="--d:2">
+			<h2>Touches physiques</h2>
+			<div class="keys">
+				<button class="key" data-btn="BACK" title="Retour">◁<small>RETOUR</small></button>
+				<button class="key" data-btn="HOME" title="Accueil">○<small>ACCUEIL</small></button>
+				<button class="key" data-btn="ENTER" title="Entrée">↵<small>ENTRÉE</small></button>
+				<button class="key" data-btn="VOLUME_UP" title="Volume +">＋<small>VOL</small></button>
+				<button class="key" data-btn="VOLUME_DOWN" title="Volume −">−<small>VOL</small></button>
+			</div>
+		</section>
+
+		<section class="card reveal" style="--d:3">
+			<h2>Gestes</h2>
+			<div class="swipes">
+				<button class="btn" data-swipe="up">Glisser ↑</button>
+				<button class="btn" data-swipe="down">Glisser ↓</button>
+				<button class="btn" data-swipe="left">Glisser ←</button>
+				<button class="btn" data-swipe="right">Glisser →</button>
+			</div>
+			<p class="hint">Sur l'écran : <b>clic</b> = tap · <b>double-clic</b> = double tap · <b>clic maintenu</b> = appui long · <b>glisser</b> = swipe</p>
+		</section>
+	</aside>
+
+	<!-- Centre : l'écran -->
+	<section class="stage reveal" style="--d:2">
+		<div class="stage-bar mono">
+			<label class="switch"><input type="checkbox" id="live" checked><span></span>DIRECT</label>
+			<select id="rate" title="Mode d'affichage des écrans">
+				<option value="video">vidéo (fluide)</option>
+				<option value="400">captures rapides</option>
+				<option value="900" selected>captures normales</option>
+				<option value="2000">captures éco</option>
+			</select>
+			<label class="switch"><input type="checkbox" id="overlay"><span></span>ÉLÉMENTS</label>
+			<select id="view" title="Affichage">
+				<option value="grid">grille</option>
+				<option value="focus">actif seul</option>
+			</select>
+			<button class="btn ghost small" id="snap">Rafraîchir</button>
+		</div>
+
+		<div class="tiles" id="tiles">
+			<div class="empty mono">aucun appareil<br><small>branche un téléphone ou lance un émulateur, puis ⟳</small></div>
+		</div>
+		<div class="coords mono dim" id="coords">x — · y —</div>
+	</section>
+
+	<!-- Droite : panneaux -->
+	<section class="panel reveal" style="--d:3">
+		<nav class="tabs mono" id="tabs">
+			<button data-tab="agent" class="on">✦ Agent</button>
+			<button data-tab="drive">Piloter</button>
+			<button data-tab="apps">Applis</button>
+			<button data-tab="elements">Éléments</button>
+			<button data-tab="device">Appareil</button>
+			<button data-tab="media">Médias</button>
+			<button data-tab="files">Fichiers</button>
+			<button data-tab="logs">Logs</button>
+			<button data-tab="macros">Macros</button>
+			<button data-tab="script">Script</button>
+			<button data-tab="journal">Journal <span class="badge" id="jCount">0</span></button>
+		</nav>
+
+		<!-- AGENT -->
+		<div class="pane on agent-pane" data-pane="agent">
+			<div class="seg mono" id="provider">
+				<button data-p="claude" class="on">Claude</button>
+				<button data-p="local">Modèle local</button>
+			</div>
+			<div class="row">
+				<select id="agentModel"></select>
+				<button class="btn ghost icon" id="agentModelsReload" title="Recharger la liste">⟳</button>
+			</div>
+			<p class="hint" id="agentModelHint"></p>
+			<textarea id="agentTask" rows="3" placeholder="Décris la tâche… ex. « Ouvre les Paramètres et dis-moi la version d'Android »"></textarea>
+			<div class="row">
+				<label class="check" id="thinkWrap"><input type="checkbox" id="agentThink"> réflexion</label>
+				<label class="check" title="Autorise aussi l'installation et la désinstallation d'applis"><input type="checkbox" id="agentAdvanced"> mode avancé</label>
+				<button class="btn danger" id="agentStop" hidden>■ Arrêter</button>
+				<button class="btn" id="agentContinue" title="Envoie la consigne comme suite de la conversation précédente sur cet appareil (l'agent garde le contexte)">Continuer ↩</button>
+				<button class="btn accent" id="agentRun">Lancer ✦</button>
+			</div>
+			<div class="limits mono">
+				<label class="check" title="Demande ton accord avant de toucher Envoyer, Payer, Supprimer… ou de valider une saisie"><input type="checkbox" id="agentGuard" checked> confirmer les actions sensibles</label>
+				<label title="Nombre maximal d'actions sur l'appareil, par agent">actions max <input type="number" id="agentMax" value="40" min="1" max="200" class="tiny"></label>
+				<label id="budgetWrap" title="Plafond de dépense par agent (Claude)">plafond <input type="number" id="agentBudget" value="1" min="0" step="0.1" class="tiny"> $</label>
+			</div>
+			<div class="row">
+				<span class="hint grow-hint" id="agentTargets"></span>
+				<button class="btn" id="agentRunAll" title="Lance la même tâche, en parallèle, sur chaque appareil coché « synchro »">Lancer sur les appareils synchro</button>
+				<button class="btn ghost danger" id="agentStopAll" title="Arrête tous les agents">■ Tout arrêter</button>
+			</div>
+			<div class="results" id="results" hidden>
+				<div class="results-head">
+					<h3 id="resultsTitle">Résultats</h3>
+					<button class="btn ghost small" id="resultsExport" title="Rapport HTML avec captures">Exporter le rapport</button>
+				</div>
+				<table class="rtable mono"><thead><tr><th>Appareil</th><th>État</th><th>Résultat</th><th>Act.</th><th>Coût</th><th>Durée</th></tr></thead><tbody id="resultsBody"></tbody></table>
+			</div>
+			<div class="feeds" id="agentFeeds"></div>
+		</div>
+
+		<!-- MACROS -->
+		<div class="pane" data-pane="macros">
+			<p class="hint">Enregistre tes gestes sur l'appareil actif (taps, glissements, touches, texte, adresses, applis), puis rejoue-les sur l'appareil actif et les appareils synchro. Les positions s'adaptent à chaque écran. ⚠ Le texte tapé est enregistré tel quel dans <code>gui/macros.json</code> : n'enregistre pas de mot de passe.</p>
+			<div class="row">
+				<input id="macroName" placeholder="Nom de la macro">
+				<button class="btn rec" id="macroRec"><span class="dot"></span>Enregistrer</button>
+				<button class="btn" id="macroStop" hidden>■ Terminer</button>
+			</div>
+			<p class="hint mono" id="macroStatus"></p>
+			<div class="row">
+				<label class="check">vitesse
+					<select id="macroSpeed"><option value="0.5">×0,5</option><option value="1" selected>×1</option><option value="2">×2</option><option value="4">×4</option></select>
+				</label>
+				<label class="check">répéter <input type="number" id="macroRepeat" value="1" min="1" max="50" class="tiny"> fois</label>
+			</div>
+			<ul class="list" id="macroList"></ul>
+		</div>
+
+		<!-- PILOTER -->
+		<div class="pane" data-pane="drive">
+			<div class="block">
+				<h3>Saisir du texte</h3>
+				<p class="hint">Touche d'abord un champ sur l'écran, puis envoie le texte.</p>
+				<textarea id="typeText" rows="3" placeholder="Texte à taper…"></textarea>
+				<div class="row">
+					<label class="check"><input type="checkbox" id="typeSubmit"> valider (Entrée)</label>
+					<button class="btn accent" id="typeBtn">Taper</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Ouvrir une adresse</h3>
+				<div class="row">
+					<input id="url" placeholder="https://… ou lien profond" value="https://">
+					<button class="btn accent" id="urlBtn">Ouvrir</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Presse-papiers</h3>
+				<textarea id="clip" rows="2" placeholder="Contenu du presse-papiers"></textarea>
+				<div class="row end">
+					<button class="btn" id="clipRead">Lire</button>
+					<button class="btn" id="clipWrite">Remplacer</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Tap précis</h3>
+				<div class="row">
+					<input id="tapX" type="number" placeholder="x" class="num">
+					<input id="tapY" type="number" placeholder="y" class="num">
+					<button class="btn" id="tapBtn">Tap</button>
+					<button class="btn" id="dtapBtn">Double</button>
+					<button class="btn" id="lpBtn">Long</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- APPLIS -->
+		<div class="pane" data-pane="apps">
+			<div class="row">
+				<input id="appFilter" placeholder="Filtrer les applis…">
+				<button class="btn" id="appsLoad">Charger</button>
+			</div>
+			<ul class="list" id="appList"><li class="dim">Clique sur « Charger ».</li></ul>
+			<div class="block">
+				<h3>Installer une appli</h3>
+				<p class="hint">.apk (Android) · .ipa / .app / .zip (iOS)</p>
+				<div class="row">
+					<input type="file" id="installFile" accept=".apk,.ipa,.zip,.app">
+					<button class="btn accent" id="installBtn">Installer</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Lancer par identifiant</h3>
+				<div class="row">
+					<input id="pkg" placeholder="com.exemple.appli">
+					<input id="locale" placeholder="langue (fr-FR)" class="num">
+					<button class="btn" id="pkgLaunch">Lancer</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- ÉLÉMENTS -->
+		<div class="pane" data-pane="elements">
+			<div class="row">
+				<input id="elFilter" placeholder="Chercher un texte, un id…">
+				<label class="check"><input type="checkbox" id="elAll"> tout</label>
+				<button class="btn" id="elLoad">Lire l'écran</button>
+			</div>
+			<p class="hint">Survole pour repérer sur l'écran, clique pour toucher l'élément.</p>
+			<ul class="list els" id="elList"></ul>
+		</div>
+
+		<!-- APPAREIL -->
+		<div class="pane" data-pane="device">
+			<div class="block">
+				<h3>Téléphone en Wi-Fi</h3>
+				<p class="hint"><b>Le plus simple :</b> téléphone branché en USB et sur le même Wi-Fi que le PC → un clic, puis tu débranches le câble. (À refaire après un redémarrage du téléphone.)</p>
+				<div class="row"><button class="btn accent" id="wifiUsb">Passer l'appareil actif en Wi-Fi</button></div>
+				<details class="wifi-pair">
+					<summary>Sans câble : associer avec un code (Android 11 et plus)</summary>
+					<ol class="hint steps">
+						<li>Sur le téléphone : Options pour les développeurs → <b>Débogage sans fil</b> → activer.</li>
+						<li>Touche <b>« Associer l'appareil avec un code d'association »</b>.</li>
+						<li>Recopie ici l'adresse IP et port <i>de cette fenêtre</i> et le code à 6 chiffres.</li>
+					</ol>
+					<div class="row">
+						<input id="pairHost" placeholder="192.168.1.20:37123" class="mono" autocomplete="off">
+						<input id="pairCode" placeholder="code" class="num mono" inputmode="numeric" maxlength="6" autocomplete="off">
+						<button class="btn" id="pairBtn">Associer</button>
+					</div>
+					<p class="hint" style="margin-top:10px">Déjà associé ? Connecte-toi avec l'adresse et le port affichés en haut de « Débogage sans fil » :</p>
+					<div class="row">
+						<input id="connectHost" placeholder="192.168.1.20:41234" class="mono" autocomplete="off">
+						<button class="btn" id="connectBtn">Connecter</button>
+					</div>
+				</details>
+				<ul class="list" id="wifiList"></ul>
+			</div>
+			<div class="block">
+				<h3>Émulateurs</h3>
+				<p class="hint">Démarre ou arrête les téléphones virtuels d'Android Studio. Ils restent allumés même si Prigojine se ferme. Mode léger par défaut (sans fenêtre, ~4× moins de processeur) : ton PC en supporte environ 10 à la fois.</p>
+				<label class="check" style="margin-bottom:8px"><input type="checkbox" id="emuWindow"> afficher la fenêtre de l'émulateur (plus gourmand)</label>
+				<div class="chips" id="emuPick">
+					<button class="chip" data-pick="Tel_Eco">☐ Tel Eco</button>
+					<button class="chip" data-pick="Tab_Eco">☐ Tab Eco</button>
+					<button class="chip" data-pick="all">☐ Tous</button>
+					<button class="chip" data-pick="none">Aucun</button>
+				</div>
+				<div class="row">
+					<span class="hint grow-hint mono" id="emuCount"></span>
+					<button class="btn accent" id="emuStartSel">▶ Démarrer la sélection</button>
+					<button class="btn danger" id="emuStopSel">■ Arrêter la sélection</button>
+				</div>
+				<ul class="list" id="emuList"><li class="dim">Chargement…</li></ul>
+				<h3 style="margin-top:16px">Surveillance automatique</h3>
+				<div class="limits mono">
+					<label>arrêter les émulateurs inutilisés après
+						<select id="setIdle"><option value="0">jamais</option><option value="10">10 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="60">1 h</option></select>
+					</label>
+					<label class="check"><input type="checkbox" id="setRestart"> redémarrer un émulateur planté ou figé</label>
+					<label class="check"><input type="checkbox" id="setNotifyDev"> prévenir quand un appareil se connecte / se déconnecte</label>
+				</div>
+				<p class="hint" style="margin-top:8px">« Inutilisé » = aucune action ni agent dessus (regarder l'écran ne compte pas). Le redémarrage ne concerne que les émulateurs démarrés depuis Prigojine.</p>
+				<div class="row"><button class="btn ghost small" id="notifPerm">🔔 Notifications Windows depuis cette page</button></div>
+			</div>
+			<div class="block">
+				<h3>Orientation</h3>
+				<div class="row">
+					<button class="btn" data-orient="portrait">▯ Portrait</button>
+					<button class="btn" data-orient="landscape">▭ Paysage</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Position GPS simulée</h3>
+				<div class="chips" id="places"></div>
+				<div class="row">
+					<input id="lat" type="number" step="any" placeholder="latitude" class="num">
+					<input id="lon" type="number" step="any" placeholder="longitude" class="num">
+					<button class="btn accent" id="locSet">Appliquer</button>
+					<button class="btn ghost" id="locClear">Réelle</button>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Appareils dans le cloud <span class="tag">payant</span></h3>
+				<p class="hint">Mobile Next Cloud : réservation de vrais téléphones. Nécessite un compte ; chaque réservation est facturée.</p>
+				<div class="row">
+					<button class="btn" id="cloudLogin">Se connecter</button>
+					<button class="btn" id="cloudList">Lister</button>
+				</div>
+				<ul class="list" id="cloudOut"></ul>
+			</div>
+		</div>
+
+		<!-- MÉDIAS -->
+		<div class="pane" data-pane="media">
+			<div class="block">
+				<h3>Capture d'écran</h3>
+				<p class="hint">Enregistrée en pleine résolution dans <code>gui/captures</code>.</p>
+				<button class="btn accent" id="saveShot">Enregistrer une capture</button>
+			</div>
+			<div class="block">
+				<h3>Vidéo de l'écran</h3>
+				<div class="row">
+					<button class="btn rec" id="recStart"><span class="dot"></span>Démarrer</button>
+					<button class="btn" id="recStop">Arrêter</button>
+					<span class="mono dim" id="recTime"></span>
+				</div>
+			</div>
+			<div class="block">
+				<h3>Galerie</h3>
+				<div class="gallery" id="gallery"></div>
+			</div>
+		</div>
+
+		<!-- FICHIERS -->
+		<div class="pane" data-pane="files">
+			<p class="hint">Fichiers de l'appareil actif (Android), en lecture seule. ⤓ copie le fichier dans le dossier Téléchargements du PC.</p>
+			<div class="chips" id="fileRoots"></div>
+			<div class="crumbs mono" id="fileCrumbs"></div>
+			<div class="row">
+				<input id="fileFilter" placeholder="Filtrer par nom…">
+				<select id="fileSort"><option value="date">plus récents</option><option value="name">nom</option><option value="size">taille</option></select>
+				<button class="btn ghost icon" id="fileReload" title="Actualiser">⟳</button>
+			</div>
+			<ul class="list files" id="fileList"><li class="dim">Choisis un dossier ci-dessus.</li></ul>
+			<button class="btn ghost small" id="fileMore" hidden>Afficher plus</button>
+		</div>
+
+		<!-- LOGS -->
+		<div class="pane" data-pane="logs">
+			<div class="row">
+				<input id="logFilter" placeholder="filtre (tag, texte… séparés par des virgules)">
+				<input id="logLimit" type="number" value="200" class="num" title="Nombre de lignes">
+				<button class="btn" id="logLoad">Lire</button>
+			</div>
+			<div class="logs mono" id="logOut"><span class="dim">Aucun log chargé.</span></div>
+			<div class="block">
+				<h3>Plantages</h3>
+				<div class="row"><button class="btn" id="crashLoad">Lister les plantages</button></div>
+				<ul class="list" id="crashList"></ul>
+				<pre class="pre" id="crashOut" hidden></pre>
+			</div>
+		</div>
+
+		<!-- SCRIPT -->
+		<div class="pane" data-pane="script">
+			<p class="hint">Enchaîne plusieurs actions d'un coup (<code>mobile_batch_commands</code>). L'appareil est ajouté automatiquement.</p>
+			<textarea id="script" rows="14" class="mono" spellcheck="false"></textarea>
+			<div class="row">
+				<label class="check"><input type="checkbox" id="scriptStop" checked> arrêter à la 1ʳᵉ erreur</label>
+				<label class="check"><input type="checkbox" id="scriptEls"> lire l'écran à la fin</label>
+				<button class="btn accent" id="scriptRun">Exécuter</button>
+			</div>
+			<pre class="pre" id="scriptOut" hidden></pre>
+		</div>
+
+		<!-- JOURNAL -->
+		<div class="pane" data-pane="journal">
+			<div class="row end"><button class="btn ghost small" id="jClear">Vider</button></div>
+			<ol class="journal mono" id="journal"></ol>
+		</div>
+	</section>
+</main>
+
+<div class="confirms" id="confirms"></div>
+<div class="toasts" id="toasts"></div>
+<script src="app.js"></script>
+</body>
+</html>

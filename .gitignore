@@ -1,0 +1,13 @@
+node_modules/
+
+# données locales de l'utilisateur (jamais publiées)
+captures/*
+!captures/.gitkeep
+macros.json
+settings.json
+*.log
+
+# versions portables générées
+Prigojine-portable/
+Prigojine-portable.zip
+Prigojine.exe

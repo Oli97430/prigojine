@@ -1,0 +1,21 @@
+{
+  "name": "prigojine",
+  "version": "1.0.0",
+  "description": "Prigojine — pilote plusieurs téléphones et tablettes Android depuis le PC : à la main, par macros ou par un agent IA (Claude ou modèle local).",
+  "license": "MIT",
+  "author": "Oli97430",
+  "private": true,
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs --open",
+    "portable": "node build-portable.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@mobilenext/mobile-mcp": "1.0.5",
+    "@modelcontextprotocol/client": "2.0.0",
+    "express": "5.1.0"
+  }
+}

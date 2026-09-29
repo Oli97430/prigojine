@@ -1,0 +1,30 @@
+PRIGOJINE — version portable
+=============================
+
+Lancer
+  Double-clique sur Prigojine.exe.
+  La page s'ouvre dans ton navigateur (http://localhost:4717) et une icône
+  apparaît près de l'horloge. Clic droit sur l'icône : Ouvrir, Journal,
+  Dossier des captures, Quitter.
+
+Aucune installation
+  Tout est dans ce dossier : l'application, Node.js et adb (pour les
+  téléphones Android). Tu peux copier le dossier entier sur une clé USB ou
+  un autre PC Windows 10/11 (64 bits).
+
+Ce qui dépend du PC où tu le lances
+  - Téléphones Android : activer le débogage USB (ou le Wi-Fi depuis
+    l'onglet Appareil). adb est fourni.
+  - Émulateurs : nécessitent Android Studio installé sur ce PC.
+  - Vidéo fluide : nécessite ffmpeg installé (sinon, affichage par captures).
+  - Agent Claude : nécessite Claude Code installé et connecté (« claude » puis « /login »).
+  - Modèles locaux : nécessitent Ollama installé.
+
+Fichiers créés à l'usage (dans ce dossier)
+  prigojine.log              journal du serveur
+  app\captures\              captures d'écran et vidéos
+  app\macros.json            macros enregistrées
+  app\settings.json          réglages de surveillance
+
+Arrêter
+  Clic droit sur l'icône près de l'horloge → Quitter.
