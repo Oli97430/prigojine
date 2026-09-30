@@ -90,6 +90,17 @@ const KNOWN_ERRORS = [
 	[/vulkan|gfxstream|OpenGL|\bGPU\b|graphics driver|ANGLE|swiftshader/i, "Problème graphique au démarrage. Mets à jour le pilote de la carte graphique ; si ça continue, décoche « afficher la fenêtre » (rendu logiciel)."],
 	[/license|licence/i, "Licence du SDK Android non acceptée : ouvre Android Studio une fois pour l'accepter."],
 ];
+const ERROR_CODES = ["accel", "image", "unknown", "disk", "memory", "lock", "gpu", "license"];
+const codedError = (code, message) => Object.assign(new Error(message), { code });
+
+// Diagnostic : { code, message } (code = type d'erreur, pour proposer la bonne réparation)
+function diagnoseEmuLog(log) {
+	const benign = /Please update the emulator to one that supports the feature|Feature '.*' is overridden|Client not connected yet|Unknown XR viewport|retrieve Vulkan renderer details/i;
+	const bad = log.split("\n").filter(l => !/^\s*(USER_)?INFO\b/.test(l) && !benign.test(l) && /FATAL|PANIC|ERROR|WARNING|error|failed|cannot|could not|not found|unable|insufficient/i.test(l)).join("\n");
+	for (let i = 0; i < KNOWN_ERRORS.length; i++) if (KNOWN_ERRORS[i][0].test(bad)) return { code: ERROR_CODES[i], message: KNOWN_ERRORS[i][1] };
+	return { code: "other", message: explainEmuLog(log) };
+}
+
 function explainEmuLog(log) {
 	// seules les lignes d'erreur comptent (les messages INFO normaux citent aussi le GPU, etc.)
 	const benign = /Please update the emulator to one that supports the feature|Feature '.*' is overridden|Client not connected yet|Unknown XR viewport|retrieve Vulkan renderer details/i; // avertissements normaux
@@ -109,10 +120,21 @@ async function accelCheck() {
 }
 
 // Vérifications avant démarrage : erreurs claires au lieu d'un émulateur qui ne démarre jamais
+// Configuration d'un émulateur : dossier, texte de config.ini et image système (image.sysdir.1)
+function avdInfo(name) {
+	const ini = fs.readFileSync(path.join(AVD_HOME, `${name}.ini`), "utf8");
+	const dir = (ini.match(/^path=(.+)$/m) || [])[1]?.trim();
+	if (!dir) throw new Error("Configuration de l'émulateur illisible");
+	const configFile = path.join(dir, "config.ini");
+	const config = fs.readFileSync(configFile, "utf8");
+	const sysdir = (config.match(/^image\.sysdir\.1\s*=\s*(.+)$/m) || [])[1]?.trim().replace(/[\\/]+$/, "") || null;
+	return { dir, configFile, config, sysdir };
+}
+
 async function preflight(name) {
-	if (!fs.existsSync(EMULATOR)) throw new Error("L'émulateur Android n'est pas installé (Android Studio → SDK Manager → « Android Emulator », ou installateur de Prigojine).");
+	if (!fs.existsSync(EMULATOR)) throw codedError("noemu", "L'émulateur Android n'est pas installé (Android Studio → SDK Manager → « Android Emulator », ou installateur de Prigojine).");
 	const a = await accelCheck();
-	if (!a.ok) throw new Error(KNOWN_ERRORS[0][1] + (a.text ? ` (Détail : ${a.text.split("\n").pop().slice(0, 160)})` : ""));
+	if (!a.ok) throw codedError("accel", KNOWN_ERRORS[0][1] + (a.text ? ` (Détail : ${a.text.split("\n").pop().slice(0, 160)})` : ""));
 	// image système déclarée dans la configuration de l'émulateur
 	try {
 		const ini = fs.readFileSync(path.join(AVD_HOME, `${name}.ini`), "utf8");
@@ -120,7 +142,7 @@ async function preflight(name) {
 		const cfg = dir ? fs.readFileSync(path.join(dir, "config.ini"), "utf8") : "";
 		const sys = (cfg.match(/^image\.sysdir\.1\s*=\s*(.+)$/m) || [])[1]?.trim();
 		if (sys && !fs.existsSync(path.join(SDK, sys, "system.img")) && !fs.existsSync(path.join(sys, "system.img"))) {
-			throw new Error(`Image Android manquante (${sys.replace(/\\$/, "")}). Ouvre Android Studio → Device Manager et répare cet émulateur, ou relance l'installateur de Prigojine.`);
+			throw codedError("image", `Image Android manquante (${sys.replace(/\\$/, "")}). Ouvre Android Studio → Device Manager et répare cet émulateur, ou relance l'installateur de Prigojine.`);
 		}
 	} catch (e) { if (/Image Android manquante/.test(e.message)) throw e; /* configuration illisible : l'émulateur dira lui-même ce qui ne va pas */ }
 }
@@ -393,7 +415,10 @@ async function connectWifi(hostport) {
 
 async function disconnectWifi(serial) {
 	if (!isNetwork(serial)) throw new Error("Ce n'est pas une connexion Wi-Fi");
+	// mode « adb tcpip 5555 » (passage USB → Wi-Fi) : on remet le téléphone en mode USB,
+	// sinon son port de débogage reste ouvert sur le réseau jusqu'au redémarrage
+	if (/:5555$/.test(serial)) await adb("-s", serial, "usb");
 	await adb("disconnect", serial);
 }
 
-module.exports = { readEmuLog, explainEmuLog, emuLogPath, accelCheck, bootCompleted, killEmulator, emulatorProcessAlive, listDir, pullFile, pressKey, KEYS: Object.keys(KEYCODES), pushFile, wifiDevices, usbToWifi, pairWifi, connectWifi, disconnectWifi, adbDevices, serialFor, listEmulators, startEmulator, stopEmulator, waitBoot, streamScreen, hasFfmpeg: !!FFMPEG };
+module.exports = { SDK, AVD_HOME, avdInfo, diagnoseEmuLog, readEmuLog, explainEmuLog, emuLogPath, accelCheck, bootCompleted, killEmulator, emulatorProcessAlive, listDir, pullFile, pressKey, KEYS: Object.keys(KEYCODES), pushFile, wifiDevices, usbToWifi, pairWifi, connectWifi, disconnectWifi, adbDevices, serialFor, listEmulators, startEmulator, stopEmulator, waitBoot, streamScreen, hasFfmpeg: !!FFMPEG };

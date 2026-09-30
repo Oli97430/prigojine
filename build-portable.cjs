@@ -10,8 +10,8 @@ const { execFileSync } = require("child_process");
 const ROOT = __dirname;                                            // projet Prigojine
 const OUT = path.resolve(ROOT, "..", "Prigojine-portable");        // dossier portable
 const ZIP = OUT + ".zip";
-const USER_DATA = ["prigojine.log", "app/captures", "app/macros.json", "app/settings.json"];
-const APP_FILES = ["server.cjs", "agent.cjs", "android.cjs", "engine.cjs", "guard.cjs", "guard-mcp.cjs", "watch.cjs", "prigojine.ico", "package.json", "LICENSE"];
+const USER_DATA = ["prigojine.log", "app/captures", "app/macros.json", "app/settings.json", "app/history.json"];
+const APP_FILES = ["server.cjs", "agent.cjs", "android.cjs", "engine.cjs", "guard.cjs", "guard-mcp.cjs", "watch.cjs", "history.cjs", "repair.cjs", "update.cjs", "download.cjs", "prigojine.ico", "package.json", "LICENSE"];
 const step = t => console.log("• " + t);
 
 // 1. Le portable ne doit pas tourner (fichiers verrouillés sous Windows)
@@ -45,7 +45,7 @@ try {
 	if (!fs.existsSync(path.join(ROOT, "node_modules"))) throw new Error("Lance d'abord « npm install » dans le dossier de Prigojine.");
 	step("copie des modules…");
 	fs.cpSync(path.join(ROOT, "node_modules"), path.join(OUT, "app", "node_modules"), { recursive: true });
-	execFileSync(process.execPath, ["-e", "require('./engine.cjs');require('@modelcontextprotocol/client');require('@modelcontextprotocol/client/stdio');require('@modelcontextprotocol/server/stdio');require('express');for (const f of ['guard','android','agent','watch']) require('./'+f+'.cjs')"], { cwd: path.join(OUT, "app") });
+	execFileSync(process.execPath, ["-e", "require('./engine.cjs');require('@modelcontextprotocol/client');require('@modelcontextprotocol/client/stdio');require('@modelcontextprotocol/server/stdio');require('express');for (const f of ['guard','android','agent','watch','history','repair','update','download']) require('./'+f+'.cjs')"], { cwd: path.join(OUT, "app") });
 	step("modules vérifiés");
 
 	// 5. Node.js et adb embarqués

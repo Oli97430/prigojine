@@ -34,7 +34,7 @@ static class Setup
 	public class Options
 	{
 		public string Dir = Path.Combine(LocalAppData, "Programs", AppName);
-		public bool App = true, Android = true, Ffmpeg = true, Avds = true, Shortcuts = true, Silent;
+		public bool App = true, Android = true, Ffmpeg = true, Avds = true, Shortcuts = true, Autostart, Silent, Update;
 	}
 
 	[STAThread]
@@ -51,6 +51,31 @@ static class Setup
 			else if (l == "/skip-ffmpeg") o.Ffmpeg = false;
 			else if (l == "/skip-avd") o.Avds = false;
 			else if (l == "/no-shortcuts") o.Shortcuts = false;
+			else if (l == "/update") { o.Update = true; o.Silent = true; }
+		}
+		if (o.Update)
+		{
+			// mise à jour lancée par Prigojine : on le ferme, on remplace l'application
+			// (données conservées), puis on le relance. Composants Android, ffmpeg et raccourcis inchangés.
+			o.Android = false; o.Ffmpeg = false; o.Avds = false; o.Shortcuts = false;
+			string logFile = Path.Combine(Path.GetTempPath(), "prigojine-update.log");
+			File.WriteAllText(logFile, "[" + DateTime.Now + "] mise à jour vers " + Version + "\r\n");
+			Action<string> w = t => File.AppendAllText(logFile, t + "\r\n");
+			try
+			{
+				Thread.Sleep(1500); // laisse Prigojine répondre à la page avant de se fermer
+				StopRunning(o.Dir);
+				new Installer(o, w, (p, t) => { }).Run();
+				Process.Start(Path.Combine(o.Dir, "Prigojine.exe"));
+				return 0;
+			}
+			catch (Exception e)
+			{
+				w("✕ Échec : " + e.Message);
+				MessageBox.Show("La mise à jour de Prigojine a échoué :\n" + e.Message + "\n\nJournal : " + logFile, "Prigojine", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				try { Process.Start(Path.Combine(o.Dir, "Prigojine.exe")); } catch { }
+				return 1;
+			}
 		}
 		if (o.Silent)
 		{
@@ -88,6 +113,7 @@ static class Setup
 				if (o.Android) image = InstallAndroid(tmp);
 				if (o.Avds) CreateAvds(image ?? FindInstalledImage());
 				if (o.Shortcuts) CreateShortcuts();
+				if (o.Autostart) SetAutostart();
 				progress(100, "Terminé");
 				log("✔ Installation terminée.");
 			}
@@ -104,7 +130,7 @@ static class Setup
 				catch (InvalidOperationException) { }
 			}
 			// on garde les données de l'utilisateur lors d'une mise à jour
-			string[] keep = { "prigojine.log", @"app\captures", @"app\macros.json", @"app\settings.json" };
+			string[] keep = { "prigojine.log", @"app\captures", @"app\macros.json", @"app\settings.json", @"app\history.json" };
 			string save = Path.Combine(Path.GetTempPath(), "prigojine-keep-" + Guid.NewGuid().ToString("N").Substring(0, 8));
 			foreach (var k in keep) Copy(Path.Combine(o.Dir, k), Path.Combine(save, k));
 			if (Directory.Exists(Path.Combine(o.Dir, "app"))) Directory.Delete(Path.Combine(o.Dir, "app"), true);
@@ -228,6 +254,14 @@ static class Setup
 			log("✔ Raccourcis créés (Bureau et menu Démarrer).");
 		}
 
+		// lancement à l'ouverture de session, en arrière-plan (sans ouvrir le navigateur)
+		void SetAutostart()
+		{
+			using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+				key.SetValue("Prigojine", "\"" + Path.Combine(o.Dir, "Prigojine.exe") + "\" /background");
+			log("✔ Prigojine se lancera au démarrage de Windows.");
+		}
+
 		void WriteUninstaller()
 		{
 			string menu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Prigojine");
@@ -237,6 +271,7 @@ static class Setup
 				"del \"" + desk + "\" >nul 2>&1\r\n" +
 				"rmdir /s /q \"" + menu + "\" >nul 2>&1\r\n" +
 				"reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Prigojine\" /f >nul 2>&1\r\n" +
+				"reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v Prigojine /f >nul 2>&1\r\n" +
 				"echo Prigojine a ete desinstalle. Les composants Android (SDK, emulateurs) sont conserves.\r\n" +
 				"cd /d \"%TEMP%\"\r\n" +
 				"(goto) 2>nul & rmdir /s /q \"" + o.Dir + "\"\r\n"; // supprime le dossier, ce script compris
@@ -313,26 +348,49 @@ static class Setup
 			log("✔ " + label + " installé.");
 		}
 
+		// Téléchargement avec reprise : après une coupure réseau, on repart de là où on s'était arrêté
 		void Download(string url, string dest, int from, int to, string label)
 		{
-			var req = (HttpWebRequest)WebRequest.Create(url);
-			req.UserAgent = "Prigojine-Installer/" + Version;
-			req.Timeout = 60000; req.ReadWriteTimeout = 120000;
-			using (var res = (HttpWebResponse)req.GetResponse())
-			using (var src = res.GetResponseStream())
-			using (var dst = File.Create(dest))
+			long done = 0, total = 0;
+			File.WriteAllBytes(dest, new byte[0]);
+			for (int attempt = 1; ; attempt++)
 			{
-				long total = res.ContentLength, done = 0; var buf = new byte[1 << 16]; int n;
-				var last = DateTime.MinValue;
-				while ((n = src.Read(buf, 0, buf.Length)) > 0)
+				try
 				{
-					dst.Write(buf, 0, n); done += n;
-					if ((DateTime.Now - last).TotalMilliseconds > 300)
+					var req = (HttpWebRequest)WebRequest.Create(url);
+					req.UserAgent = "Prigojine-Installer/" + Version;
+					req.Timeout = 60000; req.ReadWriteTimeout = 120000;
+					if (done > 0) req.AddRange(done);
+					using (var res = (HttpWebResponse)req.GetResponse())
 					{
-						last = DateTime.Now;
-						int pct = total > 0 ? from + (int)((to - from) * done / total) : from;
-						progress(pct, string.Format("Téléchargement de {0} : {1:N0} / {2:N0} Mo", label, done / 1048576.0, total / 1048576.0));
+						if (done > 0 && res.StatusCode != HttpStatusCode.PartialContent) { done = 0; File.WriteAllBytes(dest, new byte[0]); }
+						if (total == 0) total = res.ContentLength + done;
+						using (var src = res.GetResponseStream())
+						using (var dst = new FileStream(dest, FileMode.Append, FileAccess.Write))
+						{
+							var buf = new byte[1 << 16]; int n; var last = DateTime.MinValue;
+							while ((n = src.Read(buf, 0, buf.Length)) > 0)
+							{
+								dst.Write(buf, 0, n); done += n;
+								if ((DateTime.Now - last).TotalMilliseconds > 300)
+								{
+									last = DateTime.Now;
+									int pct = total > 0 ? from + (int)((to - from) * done / total) : from;
+									progress(pct, string.Format("Téléchargement de {0} : {1:N0} / {2:N0} Mo", label, done / 1048576.0, total / 1048576.0));
+								}
+							}
+						}
 					}
+					if (total > 0 && done < total) throw new IOException("connexion interrompue");
+					return;
+				}
+				catch (Exception e)
+				{
+					var we = e as WebException;
+					var code = we != null && we.Response is HttpWebResponse ? ((HttpWebResponse)we.Response).StatusCode : 0;
+					if (attempt >= 8 || code == HttpStatusCode.NotFound || code == HttpStatusCode.Forbidden) throw new Exception(label + " : téléchargement impossible (" + e.Message + ")");
+					log(string.Format("• {0} : coupure réseau, reprise ({1}/8)…", label, attempt));
+					Thread.Sleep(Math.Min(30000, 2000 * attempt));
 				}
 			}
 		}
@@ -373,6 +431,22 @@ static class Setup
 		}
 	}
 
+	// Ferme Prigojine (et ses processus) lancé depuis le dossier d'installation
+	static void StopRunning(string dir)
+	{
+		string full = Path.GetFullPath(dir).TrimEnd('\\') + "\\";
+		foreach (var p in Process.GetProcesses())
+		{
+			try
+			{
+				if (p.MainModule.FileName.StartsWith(full, StringComparison.OrdinalIgnoreCase))
+					Process.Start(new ProcessStartInfo("taskkill", "/PID " + p.Id + " /T /F") { CreateNoWindow = true, UseShellExecute = false }).WaitForExit(10000);
+			}
+			catch { }
+		}
+		Thread.Sleep(1500);
+	}
+
 	static WebClient Web() { var w = new WebClient { Encoding = Encoding.UTF8 }; w.Headers["User-Agent"] = "Prigojine-Installer/" + Version; return w; }
 
 	// Image Android déjà installée (la plus récente parmi celles que Prigojine sait utiliser)
@@ -397,7 +471,7 @@ static class Setup
 		readonly Options o;
 		readonly Panel p1 = new Panel(), p2 = new Panel(), p3 = new Panel();
 		readonly TextBox dirBox = new TextBox(), licBox = new TextBox(), logBox = new TextBox();
-		readonly CheckBox cAndroid = new CheckBox(), cFfmpeg = new CheckBox(), cAvd = new CheckBox(), cShort = new CheckBox(), cAccept = new CheckBox(), cLaunch = new CheckBox();
+		readonly CheckBox cAndroid = new CheckBox(), cFfmpeg = new CheckBox(), cAvd = new CheckBox(), cShort = new CheckBox(), cAuto = new CheckBox(), cAccept = new CheckBox(), cLaunch = new CheckBox();
 		readonly Button next = new Button(), back = new Button();
 		readonly ProgressBar bar = new ProgressBar();
 		readonly Label step = new Label(), sizeInfo = new Label();
@@ -443,7 +517,8 @@ static class Setup
 			Opt(p1, cFfmpeg, "ffmpeg — vidéo fluide des écrans (≈ 100 Mo depuis gyan.dev)", 116, true);
 			Opt(p1, cAvd, "Créer 2 émulateurs légers prêts à l'emploi (un téléphone, une tablette)", 144, true);
 			Opt(p1, cShort, "Raccourcis sur le Bureau et dans le menu Démarrer", 172, true);
-			sizeInfo.SetBounds(0, 212, 592, 90); sizeInfo.ForeColor = Dim;
+			Opt(p1, cAuto, "Lancer Prigojine au démarrage de Windows (en arrière-plan, icône près de l'horloge)", 200, false);
+			sizeInfo.SetBounds(0, 236, 592, 80); sizeInfo.ForeColor = Dim;
 			sizeInfo.Text = "Prigojine lui-même est inclus dans cet installateur. Les composants Android et ffmpeg sont téléchargés depuis leurs sites officiels et vérifiés.\r\n\r\nEspace disque nécessaire : environ 5 Go avec les composants Android (dont les émulateurs une fois utilisés), 300 Mo sans.";
 			p1.Controls.Add(sizeInfo);
 		}
@@ -480,7 +555,7 @@ static class Setup
 		{
 			if (page == 1)
 			{
-				o.Dir = dirBox.Text.Trim(); o.Android = cAndroid.Checked && cAndroid.Enabled; o.Ffmpeg = cFfmpeg.Checked; o.Avds = cAvd.Checked; o.Shortcuts = cShort.Checked;
+				o.Dir = dirBox.Text.Trim(); o.Android = cAndroid.Checked && cAndroid.Enabled; o.Ffmpeg = cFfmpeg.Checked; o.Avds = cAvd.Checked; o.Shortcuts = cShort.Checked; o.Autostart = cAuto.Checked;
 				if (o.Android)
 				{
 					licBox.Text = "Chargement de la licence depuis Google…"; Show(2);

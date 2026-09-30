@@ -5,6 +5,7 @@ captures/*
 !captures/.gitkeep
 macros.json
 settings.json
+history.json
 *.log
 
 # versions portables générées

@@ -202,6 +202,8 @@ watch.start(name => { workers.get(name)?.then(c => c.close2?.()).catch(() => {})
 
 /* ---------- Agents (un par appareil, en parallèle) ---------- */
 const agent = require("./agent.cjs");
+const history = require("./history.cjs");
+const recorders = new Map(); // appareil -> enregistrement en cours dans l'historique
 const memories = new Map(); // appareil -> contexte de la dernière conversation (pour « Continuer »)
 const running = new Map(); // device -> contrôleur
 const runs = new Map();    // runId -> { ask }
@@ -238,6 +240,7 @@ app.post("/api/agent/run", async (req, res) => {
 		const timer = setTimeout(() => { confirms.delete(id); resolve(false); }, 5 * 60 * 1000);
 		confirms.set(id, { device, action, resolve: allow => { clearTimeout(timer); confirms.delete(id); resolve(allow); } });
 		send({ type: "confirm", id, action });
+		recorders.get(device)?.event({ type: "confirm", action });
 		watch.notify("ask", "Accord demandé", `${device} : ${action}`, device);
 	});
 	const { guard = true, maxActions = 40 } = req.body || {};
@@ -250,12 +253,16 @@ app.post("/api/agent/run", async (req, res) => {
 	else if (req.body.continue) send({ type: "status", text: "Suite de la conversation précédente." });
 	memories.set(device, memory);
 	watch.touch(device);
+	const rec = history.begin({ device, deviceName: req.body.deviceName, provider, model, task, continued: memory === prev && !!req.body.continue });
+	recorders.set(device, rec);
 	const ctl = agent.runAgent({
 		provider, model, device, task, advanced: !!advanced, think: !!think,
 		guard: !!guard, maxActions: Math.max(1, Math.min(200, +maxActions || 40)), budget,
 		runId, studioUrl: `http://127.0.0.1:${PORT}`, token: TOKEN, ask, memory,
 	}, client, ev => {
 		send(ev);
+		rec.event(ev);
+		if (ev.type === "end") recorders.delete(device);
 		if (ev.type === "tool") watch.touch(device);
 		if (ev.type === "done") watch.notify(ev.isError ? "warn" : "ok", ev.isError ? "Agent interrompu" : "Agent terminé", `${device} : ${ev.text || ""}`, device);
 		if (ev.type === "error") watch.notify("error", "Erreur de l'agent", `${device} : ${ev.text}`, device);
@@ -269,6 +276,11 @@ app.post("/api/agent/run", async (req, res) => {
 	running.set(device, ctl);
 	// l'agent survit à un rechargement de la page : on arrête seulement d'écrire dans le flux fermé
 });
+
+// Historique des tâches
+app.get("/api/history", (req, res) => res.json(history.list()));
+app.delete("/api/history/:id", (req, res) => { history.remove(req.params.id); res.json({ ok: true }); });
+app.delete("/api/history", (req, res) => { history.clear(); res.json({ ok: true }); });
 
 // Demandes de confirmation en attente (pour les retrouver après un rechargement de la page)
 app.get("/api/agent/confirms", (req, res) => res.json([...confirms].map(([id, c]) => ({ id, device: c.device, action: c.action }))));
@@ -296,8 +308,43 @@ app.post("/api/agent/stop", (req, res) => {
 const android = require("./android.cjs");
 app.get("/api/emulators", async (req, res) => {
 	const r = await android.listEmulators();
-	for (const e of r.emulators) { const err = watch.getEmuError(e.name); if (err && !e.running) e.error = { message: err.message, t: err.t }; }
+	for (const e of r.emulators) {
+		const err = watch.getEmuError(e.name);
+		if (err && !e.running) e.error = { message: err.message, t: err.t, code: err.code, action: repairer.ACTIONS[err.code] || null };
+		if (repairs.has(e.name)) e.repair = repairs.get(e.name);
+	}
 	res.json(r);
+});
+// Réparation en un clic (selon la cause diagnostiquée), en arrière-plan avec progression
+const repairer = require("./repair.cjs");
+const repairs = new Map(); // nom -> { state: "run"|"ok"|"ko", pct, text }
+app.get("/api/android/license", async (req, res) => {
+	try { res.json({ text: await repairer.androidLicense() }); } catch (e) { res.json({ error: String(e.message || e) }); }
+});
+app.post("/api/emulators/repair", async (req, res) => {
+	const name = String(req.body.name || "");
+	const err = watch.getEmuError(name);
+	const code = String(req.body.code || err?.code || "other");
+	if (repairs.get(name)?.state === "run") return res.json({ ok: false, text: "Réparation déjà en cours." });
+	const st = { state: "run", pct: 0, text: "Réparation en cours…" };
+	repairs.set(name, st);
+	res.json({ ok: true, text: "Réparation lancée." });
+	try {
+		const { emulators } = await android.listEmulators();
+		const others = emulators.filter(e => e.running && e.name !== name).map(e => e.name);
+		const r = await repairer.repair(name, code, { accepted: req.body.accepted === true, others, progress: (pct, text) => Object.assign(st, { pct, text }) });
+		Object.assign(st, { state: "ok", pct: 100, text: r.text });
+		watch.notify("ok", "Réparation terminée", `${name} : ${r.text}`, name);
+		if (r.restart) {
+			watch.clearEmuError(name);
+			watch.markStarted(name);
+			await android.startEmulator(name, { light: true, cold: !!r.cold }).then(() => watch.monitorStart(name)).catch(e => watch.setEmuError(name, e.message, e.code));
+		}
+	} catch (e) {
+		Object.assign(st, { state: "ko", text: String(e.message || e) });
+		watch.notify("error", "Réparation impossible", `${name} : ${st.text}`, name);
+	}
+	setTimeout(() => { if (repairs.get(name) === st && st.state !== "run") repairs.delete(name); }, 10 * 60000);
 });
 // journal de démarrage d un émulateur (diagnostic)
 app.get("/api/emulators/log", (req, res) => res.type("text").send(android.readEmuLog(String(req.query.name).replace(/[^\w.\-]/g, ""), 120) || "(journal vide)"));
@@ -309,7 +356,7 @@ app.post("/api/emulators/start-many", async (req, res) => {
 	res.json({ ok: true, count: todo.length, text: todo.length ? `${todo.length} émulateur(s) en cours de lancement (un toutes les 5 s)` : "Rien à démarrer" });
 	for (const n of todo) {
 		watch.markStarted(n);
-		await android.startEmulator(n, { light: req.body.light !== false }).then(() => { watch.monitorStart(n); }).catch(e => watch.setEmuError(n, e.message));
+		await android.startEmulator(n, { light: req.body.light !== false }).then(() => { watch.monitorStart(n); }).catch(e => watch.setEmuError(n, e.message, e.code));
 		await new Promise(ok => setTimeout(ok, 5000));
 	}
 	if (todo.length) watch.notify("info", "Démarrage par lot lancé", `${todo.length} émulateur(s) : ils apparaîtront dans la grille une fois prêts.`);
@@ -333,10 +380,10 @@ app.post("/api/emulators/start", async (req, res) => {
 		// l'appareil apparaîtra ensuite tout seul dans la grille
 		const ok = await android.waitBoot(name, 60000);
 		const err = !ok && watch.getEmuError(name);
-		if (err) return res.json({ ok: false, text: err.message, log: true });
+		if (err) return res.json({ ok: false, text: err.message, log: true, code: err.code });
 		res.json({ ok: true, booted: ok, text: ok ? "Émulateur démarré" : "Démarrage en cours : il apparaîtra dans la grille dès qu'il est prêt (1 à 3 min, jusqu'à 15 min la toute première fois)" });
 	} catch (e) {
-		watch.setEmuError(String(req.body.name), String(e.message || e));
+		watch.setEmuError(String(req.body.name), String(e.message || e), e.code);
 		res.json({ ok: false, text: String(e.message || e) });
 	}
 });
@@ -375,6 +422,42 @@ app.get("/api/files/get", async (req, res) => {
 app.post("/api/key", async (req, res) => {
 	try { await android.pressKey(String(req.body.device), String(req.body.key), req.body.times); res.json({ isError: false, text: "ok" }); }
 	catch (e) { res.json({ isError: true, text: String(e.message || e) }); }
+});
+
+/* ---------- Mise à jour ---------- */
+const updater = require("./update.cjs");
+app.get("/api/update", async (req, res) => {
+	try { res.json({ ...(await updater.check(req.query.force === "1")), progress: updater.state }); }
+	catch (e) { res.json({ current: updater.CURRENT, mode: updater.mode(), error: String(e.message || e), progress: updater.state }); }
+});
+app.post("/api/update/install", (req, res) => {
+	updater.install().catch(e => watch.notify("error", "Mise à jour impossible", String(e.message || e)));
+	res.json({ ok: true, text: "Téléchargement de la mise à jour…" });
+});
+// vérification au démarrage puis toutes les 6 h : notification une fois par nouvelle version
+let announced = null;
+const checkUpdates = () => updater.check().then(u => {
+	if (u.newer && announced !== u.latest) { announced = u.latest; watch.notify("info", "Mise à jour disponible", `Prigojine ${u.latest} est disponible (tu as la ${u.current}).`); }
+}).catch(() => {});
+setTimeout(checkUpdates, 15000);
+setInterval(checkUpdates, 6 * 3600000);
+
+/* ---------- Démarrage avec Windows ---------- */
+// Disponible quand Prigojine est lancé par Prigojine.exe (installateur ou version portable)
+const LAUNCHER = path.resolve(ROOT, "..", "Prigojine.exe");
+const RUN_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const regRun = args => new Promise(resolve => require("child_process").execFile("reg.exe", args, { windowsHide: true, timeout: 15000 }, (e, out) => resolve({ ok: !e, out: String(out || "") })));
+app.get("/api/autostart", async (req, res) => {
+	if (process.platform !== "win32" || !fs.existsSync(LAUNCHER)) return res.json({ available: false });
+	const q = await regRun(["query", RUN_KEY, "/v", "Prigojine"]);
+	res.json({ available: true, enabled: q.ok && q.out.toLowerCase().includes(LAUNCHER.toLowerCase()) });
+});
+app.post("/api/autostart", async (req, res) => {
+	if (process.platform !== "win32" || !fs.existsSync(LAUNCHER)) return res.json({ ok: false, text: "Disponible seulement avec Prigojine.exe (installateur ou version portable)." });
+	const r = req.body.enabled
+		? await regRun(["add", RUN_KEY, "/v", "Prigojine", "/t", "REG_SZ", "/d", `"${LAUNCHER}" /background`, "/f"])
+		: await regRun(["delete", RUN_KEY, "/v", "Prigojine", "/f"]);
+	res.json({ ok: r.ok || !req.body.enabled, text: req.body.enabled ? "Prigojine se lancera à l'ouverture de session (sans ouvrir le navigateur)." : "Lancement automatique désactivé." });
 });
 
 /* ---------- Wi-Fi ---------- */

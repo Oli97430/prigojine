@@ -829,7 +829,11 @@ async function loadEmulators() {
 		h("div", { class: "grow" },
 			h("div", { class: "name" }, e.name.replace(/_/g, " ")),
 			h("div", { class: "sub" }, e.running ? `allumé · ${e.serial}` : "éteint"),
-			e.error ? h("div", { class: "emu-error" }, "⚠ " + e.error.message, " ", h("button", { class: "linkbtn", onclick: ev => { ev.stopPropagation(); showEmuLog(e.name); } }, "Voir le journal")) : null),
+			e.repair ? h("div", { class: "emu-repair " + e.repair.state }, (e.repair.state === "run" ? "⟳ " : e.repair.state === "ok" ? "✔ " : "✕ ") + e.repair.text,
+				e.repair.state === "run" ? h("div", { class: "upbar-inline" }, h("i", { style: `width:${e.repair.pct || 0}%` })) : null) : null,
+			e.error && e.repair?.state !== "run" ? h("div", { class: "emu-error" }, "⚠ " + e.error.message, " ",
+				e.error.action ? h("button", { class: "btn small accent", onclick: ev => { ev.stopPropagation(); repairEmu(e); } }, "🔧 " + e.error.action) : null, " ",
+				h("button", { class: "linkbtn", onclick: ev => { ev.stopPropagation(); showEmuLog(e.name); } }, "Voir le journal")) : null),
 		h("div", { class: "acts" }, e.running
 			? h("button", { class: "btn danger", onclick: () => emuAction("stop", e.name) }, "■ Arrêter")
 			: [h("button", { class: "btn", onclick: () => emuAction("start", e.name) }, "▶ Démarrer"),
@@ -865,7 +869,11 @@ async function loadSettings() {
 	const s = await fetch("/api/settings").then(r => r.json()).catch(() => null);
 	if (!s) return;
 	$("#setIdle").value = String(s.idleMinutes); $("#setRestart").checked = s.autoRestart; $("#setNotifyDev").checked = s.notifyDevices;
+	const a = await fetch("/api/autostart").then(r => r.json()).catch(() => ({ available: false }));
+	$("#autostartWrap").hidden = !a.available;
+	$("#setAutostart").checked = !!a.enabled;
 }
+$("#setAutostart").onchange = async e => { const r = await post("/api/autostart", { enabled: e.target.checked }); toast(r.text, !r.ok); };
 const saveSettings = () => post("/api/settings", { idleMinutes: +$("#setIdle").value, autoRestart: $("#setRestart").checked, notifyDevices: $("#setNotifyDev").checked }).then(() => toast("Réglage enregistré"));
 for (const id of ["#setIdle", "#setRestart", "#setNotifyDev"]) $(id).onchange = saveSettings;
 
@@ -891,6 +899,47 @@ $("#notifPerm").onclick = async () => {
 	pref("browserNotif", p === "granted" ? "1" : "0");
 	toast(p === "granted" ? "Notifications activées pour quand la page est en arrière-plan" : "Notifications refusées par le navigateur", p !== "granted");
 };
+
+// Réparation en un clic selon la cause diagnostiquée
+async function repairEmu(e) {
+	const code = e.error.code;
+	if (code === "accel" && !confirm("Prigojine va activer la « Plateforme de l'hyperviseur Windows ».\n\nWindows va te demander l'autorisation (droits administrateur), puis il faudra redémarrer le PC.\n\nContinuer ?")) return;
+	if (code === "memory" && !confirm("Arrêter tous les autres émulateurs allumés pour libérer de la mémoire ?")) return;
+	let accepted = false;
+	if (code === "image") {
+		accepted = await askAndroidLicense();
+		if (!accepted) return;
+	}
+	const r = await post("/api/emulators/repair", { name: e.name, code, accepted });
+	toast(r.text, !r.ok);
+	pollRepairs();
+}
+// Licence du SDK Android : texte officiel de Google, à accepter avant tout téléchargement
+function askAndroidLicense() {
+	return new Promise(async resolve => {
+		const r = await fetch("/api/android/license").then(x => x.json()).catch(e => ({ error: e.message }));
+		const check = h("input", { type: "checkbox" });
+		const ok = h("button", { class: "btn accent", disabled: true, onclick: () => { box.remove(); resolve(true); } }, "Télécharger (≈ 2 Go)");
+		check.onchange = () => { ok.disabled = !check.checked; };
+		const box = h("div", { class: "log-modal" },
+			h("div", { class: "log-card" },
+				h("h3", { style: "margin:0" }, "Licence du SDK Android (Google)"),
+				h("p", { class: "hint", style: "margin:0" }, "L'image Android est téléchargée depuis les serveurs de Google. Lis et accepte leur licence pour continuer."),
+				h("pre", { class: "pre" }, r.text || ("Impossible de charger la licence : " + (r.error || "?"))),
+				h("label", { class: "check", style: "margin:0" }, check, " J'ai lu et j'accepte les conditions de la licence du SDK Android"),
+				h("div", { class: "row end" }, h("button", { class: "btn", onclick: () => { box.remove(); resolve(false); } }, "Annuler"), ok)));
+		if (!r.text) check.disabled = true;
+		document.body.append(box);
+	});
+}
+let repairPoll = null;
+function pollRepairs() {
+	clearTimeout(repairPoll);
+	repairPoll = setTimeout(async () => {
+		await loadEmulators();
+		if (emuAll.some(e => e.repair?.state === "run")) pollRepairs();
+	}, 2500);
+}
 
 // Journal de démarrage d'un émulateur (messages bruts de l'émulateur, pour le diagnostic)
 async function showEmuLog(name) {
@@ -940,6 +989,88 @@ $("#wifiUsb").onclick = e => {
 $("#pairBtn").onclick = e => wifiAction("pair", { hostport: $("#pairHost").value, code: $("#pairCode").value }, e.currentTarget);
 $("#connectBtn").onclick = e => wifiAction("connect", { hostport: $("#connectHost").value }, e.currentTarget);
 
+/* ---------------- Mise à jour ---------------- */
+async function checkUpdate() {
+	const u = await fetch("/api/update").then(r => r.json()).catch(() => null);
+	if (!u || !u.newer || pref("skipUpdate") === u.latest) { $("#updateBar").hidden = true; document.body.classList.remove("has-update"); return; }
+	$("#updateBar").hidden = false; document.body.classList.add("has-update");
+	$("#updateNotes").href = u.url;
+	if (u.mode === "installed") {
+		$("#updateText").textContent = `Prigojine ${u.latest} est disponible (tu as la ${u.current}).`;
+		$("#updateInstall").hidden = false; $("#updateInstall").textContent = "Mettre à jour";
+	} else {
+		$("#updateText").textContent = `Prigojine ${u.latest} est disponible (tu as la ${u.current}) : ` + (u.mode === "portable" ? "télécharge la nouvelle version portable ou l'installateur." : "mets à jour les sources (git pull, npm install).");
+		$("#updateInstall").hidden = true;
+		$("#updateNotes").textContent = u.mode === "portable" ? "Télécharger" : "Nouveautés";
+	}
+}
+$("#updateLater").onclick = async () => { const u = await fetch("/api/update").then(r => r.json()).catch(() => null); if (u?.latest) pref("skipUpdate", u.latest); $("#updateBar").hidden = true; document.body.classList.remove("has-update"); layoutTiles(); };
+$("#updateInstall").onclick = async () => {
+	if (state.devs.size && [...state.devs.values()].some(d => d.agent) && !confirm("Des agents sont en cours : la mise à jour va redémarrer Prigojine et les arrêter. Continuer ?")) return;
+	$("#updateInstall").disabled = true;
+	await post("/api/update/install", {});
+	$("#updateProgress").hidden = false;
+	const poll = async () => {
+		const u = await fetch("/api/update").then(r => r.json()).catch(() => null);
+		if (!u) { $("#updateText").textContent = "Prigojine redémarre : une nouvelle page va s'ouvrir automatiquement."; return; }
+		$("#updateProgress").firstChild.style.width = (u.progress?.pct || 0) + "%";
+		$("#updateText").textContent = u.progress?.text || "…";
+		if (u.progress?.state === "ko") { toast(u.progress.text, true); $("#updateInstall").disabled = false; $("#updateProgress").hidden = true; return; }
+		setTimeout(poll, 1000);
+	};
+	poll();
+};
+setTimeout(checkUpdate, 20000);
+setInterval(checkUpdate, 6 * 3600000);
+
+/* ---------------- Historique des tâches ---------------- */
+let histRuns = [];
+const HIST_ST = { ok: "terminée", ko: "échec", run: "en cours" };
+const fmtDur = ms => ms >= 60000 ? `${Math.floor(ms / 60000)} min ${Math.round(ms % 60000 / 1000)} s` : `${Math.round(ms / 1000)} s`;
+async function loadHistory() {
+	histRuns = await fetch("/api/history").then(r => r.json()).catch(() => []);
+	renderHistory();
+}
+function renderHistory() {
+	const q = $("#histFilter").value.toLowerCase(), st = $("#histStatus").value;
+	const list = histRuns.filter(r => (!st || r.status === st) && (!q || `${r.task} ${r.deviceName} ${r.result} ${r.model}`.toLowerCase().includes(q)));
+	const cost = list.reduce((s, r) => s + (r.cost || 0), 0);
+	$("#histSummary").textContent = `${list.length} tâche(s) · ${list.filter(r => r.status === "ok").length} terminée(s) · coût total ${cost.toFixed(2)} $`;
+	fill("#histList", list.length ? list.map(r => {
+		const steps = h("ol", { class: "hist-steps", hidden: true },
+			r.steps.length ? r.steps.map(s => h("li", { class: s.error ? "err" : null }, h("b", {}, s.tool), " ", s.args || "", s.error ? h("div", { class: "hist-err" }, "✕ " + s.error) : null)) : h("li", {}, "(aucune action)"));
+		return h("li", { class: "hist-item" },
+			h("div", { class: "hist-head" },
+				h("span", { class: "st " + r.status }, HIST_ST[r.status] || r.status),
+				h("span", { class: "mono dim" }, new Date(r.t).toLocaleString()),
+				h("span", { class: "hist-dev" }, r.deviceName || r.device),
+				h("span", { class: "mono dim" }, `${r.provider === "claude" ? "Claude " : ""}${r.model}${r.continued ? " · suite" : ""}`)),
+			h("div", { class: "hist-task" }, r.task),
+			r.result ? h("div", { class: "hist-res" }, r.result.replace(/\*\*/g, "")) : null,
+			h("div", { class: "hist-foot" },
+				h("span", { class: "mono dim" }, `${r.actions} action(s) · ${r.durationMs ? fmtDur(r.durationMs) : "—"}${r.cost != null ? ` · ${r.cost.toFixed(3)} $` : ""}`),
+				h("button", { class: "btn small", onclick: () => { steps.hidden = !steps.hidden; } }, "Détails"),
+				h("button", { class: "btn small accent", title: "Remet cette tâche dans l'onglet Agent", onclick: () => relaunch(r) }, "Relancer"),
+				h("button", { class: "btn small danger", title: "Supprimer de l'historique", onclick: async () => { await fetch("/api/history/" + r.id, { method: "DELETE" }); loadHistory(); } }, "✕")),
+			steps);
+	}) : emptyItem(histRuns.length ? "Aucun résultat." : "Aucune tâche pour l'instant : lance un agent dans l'onglet ✦ Agent."));
+}
+// Relancer : même tâche, même modèle, même appareil (s'il est branché) — prêt à être lancé
+function relaunch(r) {
+	if (D(r.device)) setFocus(r.device);
+	else toast(`${r.deviceName || r.device} n'est pas connecté : la tâche sera lancée sur l'appareil actif.`, true);
+	agent.provider = r.provider === "local" ? "local" : "claude"; pref("provider", agent.provider);
+	renderAgentModels();
+	if ([...$("#agentModel").options].some(o => o.value === r.model) && !$("#agentModel").disabled) { $("#agentModel").value = r.model; updateAgentHint(); }
+	$("#agentTask").value = r.task;
+	$$("#tabs button").find(b => b.dataset.tab === "agent").click();
+	$("#agentTask").focus();
+	toast("Tâche reprise : vérifie puis clique sur « Lancer »");
+}
+$("#histFilter").oninput = renderHistory;
+$("#histStatus").onchange = renderHistory;
+$("#histClear").onclick = async () => { if (!confirm("Effacer tout l'historique des tâches ?")) return; await fetch("/api/history", { method: "DELETE" }); loadHistory(); };
+
 /* ---------------- Préférences ---------------- */
 function pref(k, v) {
 	try { if (v === undefined) return localStorage.getItem("studio." + k); localStorage.setItem("studio." + k, v); } catch { return null; }
@@ -973,6 +1104,7 @@ $("#tabs").onclick = e => {
 	if (b.dataset.tab === "elements" && !F()?.elements.length) loadElements();
 	if (b.dataset.tab === "media") loadGallery();
 	if (b.dataset.tab === "macros") loadMacros();
+	if (b.dataset.tab === "history") loadHistory();
 	if (b.dataset.tab === "files" && (!files.dir || files.device !== state.focus)) openDir("/sdcard/DCIM/Camera");
 	if (b.dataset.tab === "device") { loadEmulators(); loadWifi(); loadSettings(); }
 };
@@ -1296,7 +1428,7 @@ async function runAgentOn(d, task, model, cont = false) {
 		const res = await fetch("/api/agent/run", {
 			method: "POST", headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({
-				provider: agent.provider, model, device: d.id, task, continue: cont, advanced: $("#agentAdvanced").checked, think: $("#agentThink").checked,
+				provider: agent.provider, model, device: d.id, deviceName: d.info.name, task, continue: cont, advanced: $("#agentAdvanced").checked, think: $("#agentThink").checked,
 				guard: $("#agentGuard").checked, maxActions: +$("#agentMax").value || 40, budget: +$("#agentBudget").value || 0,
 			}),
 		});

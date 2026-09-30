@@ -202,6 +202,17 @@ const MAX_RESULT = 6000;
 // Les lectures d'écran pèsent ~2000 tokens chacune : sans ménage, le contexte déborde en quelques
 // tours et Ollama coupe le début (consignes + tâche). On ne garde en entier que les 2 derniers
 // résultats d'outil ; les plus anciens sont réduits à leur première ligne.
+// Historique borné (conversation prolongée par « Continuer ») : on garde le message système et
+// les ~60 derniers messages, en coupant toujours juste avant une consigne de l'utilisateur
+// (pour ne jamais séparer un appel d'outil de sa réponse).
+const MAX_HISTORY = 60;
+function trimHistory(messages) {
+	if (messages.length <= MAX_HISTORY + 1) return;
+	let cut = messages.length - MAX_HISTORY;
+	while (cut < messages.length - 1 && messages[cut].role !== "user") cut++;
+	if (cut > 1) messages.splice(1, cut - 1);
+}
+
 const compacted = new WeakSet();
 function compactHistory(messages) {
 	const toolIdx = messages.map((m, i) => (m.role === "tool" ? i : -1)).filter(i => i >= 0);
@@ -257,6 +268,7 @@ async function runOllama({ model, device, task, advanced, think, guard, maxActio
 		const ac = new AbortController();
 		ctl.stop = () => { ctl.stopped = true; ac.abort(); };
 		compactHistory(messages);
+		trimHistory(messages);
 		// keep_alive : le modèle reste chargé entre les tours et entre les agents
 		const body = { model, messages, tools: ollamaTools, stream: false, keep_alive: "30m", options: { num_ctx: 16384, temperature: 0.2 } };
 		if (caps.includes("thinking")) body.think = !!think;
@@ -285,7 +297,7 @@ async function runOllama({ model, device, task, advanced, think, guard, maxActio
 			return emit({ type: "done", text: content, turns: step, isError: true });
 		}
 
-		for (const call of calls) {
+		for (const [ci, call] of calls.entries()) {
 			if (ctl.stopped) return emit({ type: "status", text: "Arrêté." });
 			const name = call.function?.name;
 			let args = call.function?.arguments || {};
@@ -298,7 +310,10 @@ async function runOllama({ model, device, task, advanced, think, guard, maxActio
 				if (name === "mobile_list_elements_on_screen") args.format = "text";
 				delete args.locale;
 				try {
-					if (++actions > maxActions) { emit({ type: "result", name, isError: true, text: "Limite d'actions atteinte." }); return emit({ type: "done", text: `Limite de ${maxActions} actions atteinte : agent arrêté.`, isError: true }); }
+					if (++actions > maxActions) {
+						// réponses « non exécuté » pour garder un historique cohérent (bouton Continuer)
+						for (const c of calls.slice(ci)) messages.push({ role: "tool", tool_name: c.function?.name, content: "Non exécuté : limite d'actions atteinte." });
+						emit({ type: "result", name, isError: true, text: "Limite d'actions atteinte." }); return emit({ type: "done", text: `Limite de ${maxActions} actions atteinte : agent arrêté.`, isError: true }); }
 					if (guard) {
 						let elements = [];
 						if (needsScreen(name)) {

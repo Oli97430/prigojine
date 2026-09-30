@@ -18,13 +18,17 @@ static class Prigojine
 	static StreamWriter log;
 	static bool quitting;
 
+	// /background : lancement à l'ouverture de session Windows, sans ouvrir le navigateur
+	static bool background;
+
 	[STAThread]
-	static void Main()
+	static void Main(string[] args)
 	{
+		background = Array.Exists(args, a => a.Equals("/background", StringComparison.OrdinalIgnoreCase));
 		bool first;
 		using (var mutex = new Mutex(true, "Prigojine-portable-4717", out first))
 		{
-			if (!first || Responds()) { OpenBrowser(); return; } // déjà lancé : on ouvre simplement la page
+			if (!first || Responds()) { if (!background) OpenBrowser(); return; } // déjà lancé : on ouvre simplement la page
 			Application.EnableVisualStyles();
 			try { StartServer(); }
 			catch (Exception e) { MessageBox.Show("Impossible de démarrer Prigojine :\n" + e.Message, "Prigojine", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
@@ -32,7 +36,7 @@ static class Prigojine
 			new Thread(() =>
 			{
 				for (int i = 0; i < 60 && !Responds(); i++) Thread.Sleep(500);
-				if (Responds()) { OpenBrowser(); PollNotes(); }
+				if (Responds()) { if (!background) OpenBrowser(); PollNotes(); }
 				else Notify("Le serveur ne répond pas. Voir le journal (clic droit sur l'icône).", ToolTipIcon.Error);
 			}) { IsBackground = true }.Start();
 			Application.Run();
@@ -88,7 +92,7 @@ static class Prigojine
 		menu.Items.Add("Quitter", null, (s, e) => Quit());
 		tray = new NotifyIcon { Icon = icon, Text = "Prigojine — " + Url, Visible = true, ContextMenuStrip = menu };
 		tray.DoubleClick += (s, e) => OpenBrowser();
-		Notify("Prigojine démarre… la page va s'ouvrir.", ToolTipIcon.Info);
+		if (!background) Notify("Prigojine démarre… la page va s'ouvrir.", ToolTipIcon.Info);
 	}
 
 	static void Quit()

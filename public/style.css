@@ -394,3 +394,31 @@ input.tiny { width: 58px; padding: 4px 6px; font: 11px var(--mono); margin: 0 3p
 .log-modal { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 24px; }
 .log-card { width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 16px; }
 .log-card .pre { max-height: none; flex: 1; overflow: auto; margin: 0; }
+
+/* ---------- Historique ---------- */
+.hist-item { display: block !important; padding: 10px 12px !important; }
+.hist-head { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; font-size: 11.5px; }
+.hist-dev { font-weight: 600; }
+.hist-task { margin: 6px 0 4px; font-weight: 600; font-size: 13px; white-space: pre-wrap; }
+.hist-res { color: #c9c4ba; font-size: 12.5px; line-height: 1.45; max-height: 5.8em; overflow: hidden; white-space: pre-wrap; }
+.hist-foot { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.hist-foot > span { margin-right: auto; font-size: 11px; }
+.hist-steps { margin: 8px 0 0; padding-left: 20px; font: 11px/1.5 var(--mono); color: var(--dim); max-height: 240px; overflow: auto; }
+.hist-steps b { color: var(--blue); font-weight: 600; }
+.hist-steps li.err b { color: var(--red); }
+.hist-err { color: var(--red); }
+
+/* ---------- Réparation d'un émulateur ---------- */
+.emu-error .btn { margin-top: 4px; }
+.emu-repair { margin-top: 4px; font-size: 12px; }
+.emu-repair.run { color: var(--amber); } .emu-repair.ok { color: var(--green); } .emu-repair.ko { color: var(--red); }
+.upbar-inline { height: 4px; margin-top: 4px; background: rgba(255,255,255,.08); border-radius: 4px; overflow: hidden; }
+.upbar-inline i { display: block; height: 100%; background: var(--amber); transition: width .3s; }
+
+/* ---------- Bandeau de mise à jour ---------- */
+.update-bar { display: flex; align-items: center; gap: 10px; padding: 8px 24px; background: linear-gradient(90deg, rgba(255,178,62,.18), rgba(255,178,62,.06)); border-bottom: 1px solid rgba(255,178,62,.35); font-size: 13px; }
+.update-bar[hidden] { display: none; }
+.update-bar > span { flex: 1; }
+.update-bar .upbar-inline { width: 160px; margin: 0; }
+.update-bar a.btn { text-decoration: none; }
+body.has-update .bench { height: calc(100vh - 72px - 46px); }

@@ -95,12 +95,13 @@ async function restart(name, why, onEmulatorGone) {
 	await android.stopEmulator(name).catch(() => {});
 	await android.killEmulator(name).catch(() => {});
 	await new Promise(ok => setTimeout(ok, 3000));
-	await android.startEmulator(name, { light: true }).then(() => { monitorStart(name); }).catch(e => setEmuError(name, e.message));
+	await android.startEmulator(name, { light: true }).then(() => { monitorStart(name); }).catch(e => setEmuError(name, e.message, e.code));
 }
 
 /* ---------- Suivi du démarrage : afficher la cause d'un échec ---------- */
 const emuErrors = new Map(); // nom -> { t, message, log }
 const getEmuError = name => emuErrors.get(name) || null;
+const clearEmuError = name => emuErrors.delete(name);
 const monitoring = new Set();
 async function monitorStart(name) {
 	if (monitoring.has(name)) return;
@@ -117,8 +118,8 @@ async function monitorStart(name) {
 			// 25 s de marge : le lanceur de l'émulateur met quelques secondes à créer son processus
 			if (Date.now() - t0 > 25000 && !(await android.emulatorProcessAlive(name))) {
 				const log = android.readEmuLog(name);
-				const message = android.explainEmuLog(log);
-				emuErrors.set(name, { t: Date.now(), message, log });
+				const { code, message } = android.diagnoseEmuLog(log);
+				emuErrors.set(name, { t: Date.now(), code, message, log });
 				notify("error", "L'émulateur ne démarre pas", `${name} : ${message}`, name);
 				return;
 			}
@@ -128,12 +129,13 @@ async function monitorStart(name) {
 			}
 		}
 		const log = android.readEmuLog(name);
-		emuErrors.set(name, { t: Date.now(), message: "Pas démarré au bout de 20 min. " + android.explainEmuLog(log), log });
+		const d = android.diagnoseEmuLog(log);
+		emuErrors.set(name, { t: Date.now(), code: d.code, message: "Pas démarré au bout de 20 min. " + d.message, log });
 		notify("error", "L'émulateur ne démarre pas", `${name} : pas démarré au bout de 20 min.`, name);
 	} finally { monitoring.delete(name); }
 }
 // échec avant même le lancement (vérifications préalables)
-const setEmuError = (name, message) => { emuErrors.set(name, { t: Date.now(), message, log: android.readEmuLog(name) }); notify("error", "L'émulateur ne démarre pas", `${name} : ${message}`, name); };
+const setEmuError = (name, message, code = "other") => { emuErrors.set(name, { t: Date.now(), code, message, log: android.readEmuLog(name) }); notify("error", "L'émulateur ne démarre pas", `${name} : ${message}`, name); };
 
 function start(onEmulatorGone, busyCheck) {
 	if (busyCheck) isBusy = busyCheck;
@@ -144,4 +146,4 @@ function start(onEmulatorGone, busyCheck) {
 	}, 20000);
 }
 
-module.exports = { monitorStart, getEmuError, setEmuError, notify, notesSince, touch, lastActive, getSettings, setSettings, markStoppedByUser, markStarted, start };
+module.exports = { monitorStart, getEmuError, setEmuError, clearEmuError, notify, notesSince, touch, lastActive, getSettings, setSettings, markStoppedByUser, markStarted, start };

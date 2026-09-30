@@ -1,6 +1,6 @@
 {
   "name": "prigojine",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Prigojine — pilote plusieurs téléphones et tablettes Android depuis le PC : à la main, par macros ou par un agent IA (Claude ou modèle local).",
   "license": "MIT",
   "author": "Oli97430",

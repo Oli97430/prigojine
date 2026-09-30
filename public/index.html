@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prigojine</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="fonts/fonts.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -31,6 +29,13 @@
 	</div>
 </header>
 
+<div class="update-bar" id="updateBar" hidden>
+	<span id="updateText"></span>
+	<div class="upbar-inline" id="updateProgress" hidden><i></i></div>
+	<button class="btn small accent" id="updateInstall">Mettre à jour</button>
+	<a class="btn small" id="updateNotes" target="_blank" rel="noopener">Nouveautés</a>
+	<button class="btn small ghost" id="updateLater">Plus tard</button>
+</div>
 <main class="bench">
 	<!-- Colonne gauche : télémétrie + touches -->
 	<aside class="rail">
@@ -98,6 +103,7 @@
 	<section class="panel reveal" style="--d:3">
 		<nav class="tabs mono" id="tabs">
 			<button data-tab="agent" class="on">✦ Agent</button>
+			<button data-tab="history">Historique</button>
 			<button data-tab="drive">Piloter</button>
 			<button data-tab="apps">Applis</button>
 			<button data-tab="elements">Éléments</button>
@@ -147,6 +153,18 @@
 				<table class="rtable mono"><thead><tr><th>Appareil</th><th>État</th><th>Résultat</th><th>Act.</th><th>Coût</th><th>Durée</th></tr></thead><tbody id="resultsBody"></tbody></table>
 			</div>
 			<div class="feeds" id="agentFeeds"></div>
+		</div>
+
+		<!-- HISTORIQUE -->
+		<div class="pane" data-pane="history">
+			<p class="hint">Toutes les tâches confiées aux agents, les plus récentes en premier (300 au maximum, enregistrées sur ce PC).</p>
+			<div class="row">
+				<input id="histFilter" placeholder="Chercher une tâche, un appareil, un résultat…">
+				<select id="histStatus"><option value="">tous</option><option value="ok">terminées</option><option value="ko">échecs</option></select>
+				<button class="btn ghost small danger" id="histClear">Tout effacer</button>
+			</div>
+			<p class="hint mono" id="histSummary" style="margin-top:8px"></p>
+			<ul class="list hist" id="histList"></ul>
 		</div>
 
 		<!-- MACROS -->
@@ -290,6 +308,7 @@
 					</label>
 					<label class="check"><input type="checkbox" id="setRestart"> redémarrer un émulateur planté ou figé</label>
 					<label class="check"><input type="checkbox" id="setNotifyDev"> prévenir quand un appareil se connecte / se déconnecte</label>
+					<label class="check" id="autostartWrap" hidden><input type="checkbox" id="setAutostart"> lancer Prigojine au démarrage de Windows (en arrière-plan)</label>
 				</div>
 				<p class="hint" style="margin-top:8px">« Inutilisé » = aucune action ni agent dessus (regarder l'écran ne compte pas). Le redémarrage ne concerne que les émulateurs démarrés depuis Prigojine.</p>
 				<div class="row"><button class="btn ghost small" id="notifPerm">🔔 Notifications Windows depuis cette page</button></div>

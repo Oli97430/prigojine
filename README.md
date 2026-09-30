@@ -15,6 +15,10 @@ Interface web locale, en français, testée sous Windows 11.
 - **Fichiers** : glisser-déposer un APK (installation) ou un fichier (envoi dans Téléchargements) ; parcourir et récupérer photos et documents.
 - **Wi-Fi** : passage de l'USB au Wi-Fi en un clic, ou appairage par code (Android 11+).
 - **Notifications** Windows : agent terminé, accord demandé, émulateur planté.
+- **Diagnostic et réparation en un clic** quand un émulateur ne démarre pas (hyperviseur Windows, image Android manquante, verrou, mémoire, pilote graphique…).
+- **Historique** des tâches des agents (résultats, coûts, étapes, relance en un clic).
+- **Mise à jour automatique** depuis les Releases GitHub (version installée), **démarrage avec Windows** en option.
+- Fonctionne **hors ligne** (polices intégrées) ; téléchargements avec **reprise après coupure** et vérification des sommes de contrôle.
 
 ## Démarrer
 
@@ -62,7 +66,7 @@ Pour fabriquer la version portable : `npm run portable` (ou `Construire-portable
 
 ## Données locales
 
-Tes captures (`captures/`), macros (`macros.json`) et réglages (`settings.json`) restent sur ton PC et sont exclus du dépôt.
+Tes captures (`captures/`), macros (`macros.json`), réglages (`settings.json`) et historique (`history.json`) restent sur ton PC et sont exclus du dépôt.
 
 ## Licence
 
