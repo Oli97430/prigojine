@@ -22,7 +22,7 @@ using System.Xml;
 static class Setup
 {
 	const string AppName = "Prigojine";
-	const string Version = "1.1.0";
+	const string Version = "1.1.1";
 	static readonly string LocalAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 	static readonly string Sdk = Path.Combine(LocalAppData, "Android", "Sdk");
 	static readonly string AvdHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".android", "avd");

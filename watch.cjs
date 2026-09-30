@@ -95,8 +95,45 @@ async function restart(name, why, onEmulatorGone) {
 	await android.stopEmulator(name).catch(() => {});
 	await android.killEmulator(name).catch(() => {});
 	await new Promise(ok => setTimeout(ok, 3000));
-	await android.startEmulator(name, { light: true }).catch(e => notify("error", "Redémarrage impossible", `${name} : ${e.message}`, name));
+	await android.startEmulator(name, { light: true }).then(() => { monitorStart(name); }).catch(e => setEmuError(name, e.message));
 }
+
+/* ---------- Suivi du démarrage : afficher la cause d'un échec ---------- */
+const emuErrors = new Map(); // nom -> { t, message, log }
+const getEmuError = name => emuErrors.get(name) || null;
+const monitoring = new Set();
+async function monitorStart(name) {
+	if (monitoring.has(name)) return;
+	monitoring.add(name);
+	emuErrors.delete(name);
+	const t0 = Date.now();
+	let warned = false;
+	try {
+		while (Date.now() - t0 < 20 * 60000) {
+			await new Promise(ok => setTimeout(ok, 5000));
+			const e = (await android.listEmulators().catch(() => ({ emulators: [] }))).emulators.find(x => x.name === name);
+			if (e?.serial && await android.bootCompleted(e.serial)) return; // démarré : tout va bien
+			if (st(name).stoppedByUser) return;
+			// 25 s de marge : le lanceur de l'émulateur met quelques secondes à créer son processus
+			if (Date.now() - t0 > 25000 && !(await android.emulatorProcessAlive(name))) {
+				const log = android.readEmuLog(name);
+				const message = android.explainEmuLog(log);
+				emuErrors.set(name, { t: Date.now(), message, log });
+				notify("error", "L'émulateur ne démarre pas", `${name} : ${message}`, name);
+				return;
+			}
+			if (!warned && Date.now() - t0 > 8 * 60000) {
+				warned = true;
+				notify("warn", "Démarrage très long", `${name} n'a toujours pas fini de démarrer après 8 min (normal la toute première fois ; sinon, PC surchargé ou accélération matérielle absente).`, name);
+			}
+		}
+		const log = android.readEmuLog(name);
+		emuErrors.set(name, { t: Date.now(), message: "Pas démarré au bout de 20 min. " + android.explainEmuLog(log), log });
+		notify("error", "L'émulateur ne démarre pas", `${name} : pas démarré au bout de 20 min.`, name);
+	} finally { monitoring.delete(name); }
+}
+// échec avant même le lancement (vérifications préalables)
+const setEmuError = (name, message) => { emuErrors.set(name, { t: Date.now(), message, log: android.readEmuLog(name) }); notify("error", "L'émulateur ne démarre pas", `${name} : ${message}`, name); };
 
 function start(onEmulatorGone, busyCheck) {
 	if (busyCheck) isBusy = busyCheck;
@@ -107,4 +144,4 @@ function start(onEmulatorGone, busyCheck) {
 	}, 20000);
 }
 
-module.exports = { notify, notesSince, touch, lastActive, getSettings, setSettings, markStoppedByUser, markStarted, start };
+module.exports = { monitorStart, getEmuError, setEmuError, notify, notesSince, touch, lastActive, getSettings, setSettings, markStoppedByUser, markStarted, start };

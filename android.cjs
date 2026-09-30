@@ -53,22 +53,98 @@ async function listEmulators() {
 // il continue de tourner même si Prigojine ou la fenêtre qui l'a lancé se ferme.
 // light (par défaut) : sans fenêtre, rendu graphique logiciel, sans son — environ 4 à 5 fois
 // moins de processeur (mesuré : 3,4 % contre 15,4 % du PC). L'écran se voit dans Prigojine.
+/* ---------- Diagnostic des émulateurs ---------- */
+const os = require("os");
+const LOG_DIR = path.join(os.homedir(), ".prigojine", "emulateurs");
+const AVD_HOME = process.env.ANDROID_AVD_HOME || path.join(os.homedir(), ".android", "avd");
+// un fichier par démarrage (l'ancien peut rester verrouillé quelques secondes après un arrêt) ;
+// seuls les 3 plus récents sont gardés
+const emuLogs = name => { try { return fs.readdirSync(LOG_DIR).filter(f => f.startsWith(name + "--") && f.endsWith(".log")).sort(); } catch { return []; } };
+const emuLogPath = name => { const l = emuLogs(name); return l.length ? path.join(LOG_DIR, l[l.length - 1]) : path.join(LOG_DIR, `${name}--0.log`); };
+function newEmuLog(name) {
+	fs.mkdirSync(LOG_DIR, { recursive: true });
+	for (const old of emuLogs(name).slice(0, -2)) { try { fs.rmSync(path.join(LOG_DIR, old)); } catch { /* encore ouvert */ } }
+	const file = path.join(LOG_DIR, `${name}--${Date.now()}.log`);
+	fs.writeFileSync(file, `[${new Date().toLocaleString()}] démarrage de ${name}\n`);
+	return file;
+}
+
+// Dernières lignes utiles du journal de démarrage d'un émulateur
+function readEmuLog(name, lines = 60) {
+	try {
+		const txt = fs.readFileSync(emuLogPath(name), "utf8").replace(/\r/g, "");
+		return txt.split("\n").filter(l => l.trim()).slice(-lines).join("\n");
+	} catch { return ""; }
+}
+
+// Traduit les messages de l'émulateur en explication et solution
+const KNOWN_ERRORS = [
+	[/hardware acceleration|x86_64 emulation currently requires|\bHAXM\b|\bWHPX\b|\bAEHD\b|hypervisor|accel(eration)? .*(not|isn't|unavailable|disabled)|VT-x|AMD-V|SVM/i,
+		"Accélération matérielle indisponible. Active la « Plateforme de l'hyperviseur Windows » (Paramètres → Système → Fonctionnalités facultatives → Plus de fonctionnalités Windows) et la virtualisation (VT-x / AMD-V / SVM) dans le BIOS, puis redémarre le PC."],
+	[/(No initial system image|AVD system path|ANDROID_SDK_ROOT|Cannot find .*system image|system image .*(missing|not found)|kernel.*(not found|missing)|ramdisk.*not found|sysdir)/i,
+		"Image Android manquante pour cet émulateur. Ouvre Android Studio → Device Manager et répare/télécharge l'image, ou relance l'installateur de Prigojine."],
+	[/Unknown AVD name|Cannot find AVD(?! system)|No AVD/i, "Émulateur introuvable : il a peut-être été supprimé ou renommé dans Android Studio."],
+	[/(not enough|insufficient|no) (disk )?space|ENOSPC|disk full/i, "Disque plein : libère au moins 5 Go puis réessaie."],
+	[/(Could not|Failed to|cannot) (allocate|reserve).*(memory|RAM)|out of memory|not enough (memory|RAM)|insufficient (RAM|memory)|free up memory|backing store for guest RAM/i, "Pas assez de mémoire (RAM) libre : arrête d'autres émulateurs ou applications."],
+	[/(another|already).*(running|instance)|multiinstance|\.lock|is already in use/i, "L'émulateur semble déjà utilisé (ou un verrou est resté après un plantage). Arrête-le, ou redémarre le PC."],
+	[/vulkan|gfxstream|OpenGL|\bGPU\b|graphics driver|ANGLE|swiftshader/i, "Problème graphique au démarrage. Mets à jour le pilote de la carte graphique ; si ça continue, décoche « afficher la fenêtre » (rendu logiciel)."],
+	[/license|licence/i, "Licence du SDK Android non acceptée : ouvre Android Studio une fois pour l'accepter."],
+];
+function explainEmuLog(log) {
+	// seules les lignes d'erreur comptent (les messages INFO normaux citent aussi le GPU, etc.)
+	const benign = /Please update the emulator to one that supports the feature|Feature '.*' is overridden|Client not connected yet|Unknown XR viewport|retrieve Vulkan renderer details/i; // avertissements normaux
+	const bad = log.split("\n").filter(l => !/^\s*(USER_)?INFO\b/.test(l) && !benign.test(l) && /FATAL|PANIC|ERROR|WARNING|error|failed|cannot|could not|not found|unable|insufficient/i.test(l)).join("\n");
+	for (const [re, msg] of KNOWN_ERRORS) if (re.test(bad)) return msg;
+	const last = bad.split("\n").reverse().find(l => l.trim());
+	return "L'émulateur s'est arrêté pendant le démarrage." + (last ? " Dernier message : " + last.replace(/^\s*(FATAL|PANIC|ERROR|WARNING|INFO)\s*\|\s*/i, "").slice(0, 200) : "");
+}
+
+// Accélération matérielle (résultat gardé 10 min : la commande prend quelques secondes)
+let accelCache = null;
+async function accelCheck() {
+	if (accelCache && Date.now() - accelCache.t < 600000) return accelCache;
+	const out = await new Promise(resolve => execFile(EMULATOR, ["-accel-check"], { timeout: 30000, windowsHide: true }, (e, so, se) => resolve({ code: e ? (e.code ?? 1) : 0, text: String(so || "") + String(se || "") })));
+	accelCache = { t: Date.now(), ok: out.code === 0 && /usable|installed and usable|operational/i.test(out.text), text: out.text.trim() };
+	return accelCache;
+}
+
+// Vérifications avant démarrage : erreurs claires au lieu d'un émulateur qui ne démarre jamais
+async function preflight(name) {
+	if (!fs.existsSync(EMULATOR)) throw new Error("L'émulateur Android n'est pas installé (Android Studio → SDK Manager → « Android Emulator », ou installateur de Prigojine).");
+	const a = await accelCheck();
+	if (!a.ok) throw new Error(KNOWN_ERRORS[0][1] + (a.text ? ` (Détail : ${a.text.split("\n").pop().slice(0, 160)})` : ""));
+	// image système déclarée dans la configuration de l'émulateur
+	try {
+		const ini = fs.readFileSync(path.join(AVD_HOME, `${name}.ini`), "utf8");
+		const dir = (ini.match(/^path=(.+)$/m) || [])[1]?.trim();
+		const cfg = dir ? fs.readFileSync(path.join(dir, "config.ini"), "utf8") : "";
+		const sys = (cfg.match(/^image\.sysdir\.1\s*=\s*(.+)$/m) || [])[1]?.trim();
+		if (sys && !fs.existsSync(path.join(SDK, sys, "system.img")) && !fs.existsSync(path.join(sys, "system.img"))) {
+			throw new Error(`Image Android manquante (${sys.replace(/\\$/, "")}). Ouvre Android Studio → Device Manager et répare cet émulateur, ou relance l'installateur de Prigojine.`);
+		}
+	} catch (e) { if (/Image Android manquante/.test(e.message)) throw e; /* configuration illisible : l'émulateur dira lui-même ce qui ne va pas */ }
+}
+
 async function startEmulator(name, { cold = false, light = true } = {}) {
 	const { emulators } = await listEmulators();
 	if (!emulators.some(e => e.name === name)) throw new Error(`Émulateur inconnu : ${name}`);
 	if (!/^[\w.\-]+$/.test(name)) throw new Error("Nom d'émulateur invalide");
+	await preflight(name);
+	const logFile = newEmuLog(name);
 	const args = ["-avd", name]
 		.concat(cold ? ["-no-snapshot-load"] : [])
 		.concat(light ? ["-no-window", "-gpu", "swiftshader_indirect", "-no-audio"] : []);
 	if (process.platform === "win32") {
-		const cmd = `"${EMULATOR}" ${args.join(" ")}`;
+		// messages de l'émulateur enregistrés dans ~/.prigojine/emulateurs/<nom>.log (diagnostic)
+		const cmd = `cmd.exe /s /c ""${EMULATOR}" ${args.join(" ")} >> "${logFile}" 2>&1"`;
 		// ShowWindow = 0 : pas de fenêtre de console noire pour l'émulateur
 		const ps = `$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }; ` +
 			`Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${cmd.replace(/'/g, "''")}'; ProcessStartupInformation = $si } | Select-Object -ExpandProperty ReturnValue`;
 		const out = (await run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], 30000)).trim();
 		if (out !== "0") throw new Error("Le lancement de l'émulateur a échoué (code " + (out || "?") + ")");
 	} else {
-		spawn(EMULATOR, args, { detached: true, stdio: "ignore" }).unref();
+		const out = fs.openSync(logFile, "a");
+		spawn(EMULATOR, args, { detached: true, stdio: ["ignore", out, out] }).unref();
 	}
 }
 
@@ -320,4 +396,4 @@ async function disconnectWifi(serial) {
 	await adb("disconnect", serial);
 }
 
-module.exports = { bootCompleted, killEmulator, emulatorProcessAlive, listDir, pullFile, pressKey, KEYS: Object.keys(KEYCODES), pushFile, wifiDevices, usbToWifi, pairWifi, connectWifi, disconnectWifi, adbDevices, serialFor, listEmulators, startEmulator, stopEmulator, waitBoot, streamScreen, hasFfmpeg: !!FFMPEG };
+module.exports = { readEmuLog, explainEmuLog, emuLogPath, accelCheck, bootCompleted, killEmulator, emulatorProcessAlive, listDir, pullFile, pressKey, KEYS: Object.keys(KEYCODES), pushFile, wifiDevices, usbToWifi, pairWifi, connectWifi, disconnectWifi, adbDevices, serialFor, listEmulators, startEmulator, stopEmulator, waitBoot, streamScreen, hasFfmpeg: !!FFMPEG };

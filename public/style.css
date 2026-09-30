@@ -387,3 +387,10 @@ input.tiny { width: 58px; padding: 4px 6px; font: 11px var(--mono); margin: 0 3p
 /* ---------- Page ouverte sans clé d'accès ---------- */
 .auth-lock { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 32px; text-align: center;
 	background: rgba(15,16,18,.94); color: var(--amber); font: 600 16px var(--sans); line-height: 1.6; }
+
+/* ---------- Échec de démarrage d'un émulateur ---------- */
+.emu-error { margin-top: 4px; color: var(--red); font-size: 12px; line-height: 1.4; white-space: normal; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--amber); font: inherit; text-decoration: underline; cursor: pointer; }
+.log-modal { position: fixed; inset: 0; z-index: 80; background: rgba(0,0,0,.6); display: grid; place-items: center; padding: 24px; }
+.log-card { width: min(900px, 100%); max-height: 85vh; display: flex; flex-direction: column; gap: 10px; background: var(--card); border: 1px solid var(--line-2); border-radius: 14px; padding: 16px; }
+.log-card .pre { max-height: none; flex: 1; overflow: auto; margin: 0; }

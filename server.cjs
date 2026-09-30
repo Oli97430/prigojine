@@ -294,7 +294,13 @@ app.post("/api/agent/stop", (req, res) => {
 
 /* ---------- Émulateurs ---------- */
 const android = require("./android.cjs");
-app.get("/api/emulators", async (req, res) => res.json(await android.listEmulators()));
+app.get("/api/emulators", async (req, res) => {
+	const r = await android.listEmulators();
+	for (const e of r.emulators) { const err = watch.getEmuError(e.name); if (err && !e.running) e.error = { message: err.message, t: err.t }; }
+	res.json(r);
+});
+// journal de démarrage d un émulateur (diagnostic)
+app.get("/api/emulators/log", (req, res) => res.type("text").send(android.readEmuLog(String(req.query.name).replace(/[^\w.\-]/g, ""), 120) || "(journal vide)"));
 // Démarrage par lot : lancés à 5 s d'intervalle (évite de saturer le PC d'un coup), sans attendre la fin
 app.post("/api/emulators/start-many", async (req, res) => {
 	const names = (Array.isArray(req.body.names) ? req.body.names : []).map(String).slice(0, 30);
@@ -303,7 +309,7 @@ app.post("/api/emulators/start-many", async (req, res) => {
 	res.json({ ok: true, count: todo.length, text: todo.length ? `${todo.length} émulateur(s) en cours de lancement (un toutes les 5 s)` : "Rien à démarrer" });
 	for (const n of todo) {
 		watch.markStarted(n);
-		await android.startEmulator(n, { light: req.body.light !== false }).catch(e => watch.notify("error", "Démarrage impossible", `${n} : ${e.message}`, n));
+		await android.startEmulator(n, { light: req.body.light !== false }).then(() => { watch.monitorStart(n); }).catch(e => watch.setEmuError(n, e.message));
 		await new Promise(ok => setTimeout(ok, 5000));
 	}
 	if (todo.length) watch.notify("info", "Démarrage par lot lancé", `${todo.length} émulateur(s) : ils apparaîtront dans la grille une fois prêts.`);
@@ -320,12 +326,19 @@ app.post("/api/emulators/stop-many", async (req, res) => {
 app.post("/api/emulators/start", async (req, res) => {
 	try {
 		watch.markStarted(String(req.body.name));
-		await android.startEmulator(String(req.body.name), { cold: !!req.body.cold, light: req.body.light !== false });
+		const name = String(req.body.name);
+		await android.startEmulator(name, { cold: !!req.body.cold, light: req.body.light !== false });
+		watch.monitorStart(name); // suit le démarrage et explique un éventuel échec
 		// un premier démarrage peut prendre jusqu'à ~15 min : on n'attend qu'une minute,
 		// l'appareil apparaîtra ensuite tout seul dans la grille
-		const ok = await android.waitBoot(String(req.body.name), 60000);
+		const ok = await android.waitBoot(name, 60000);
+		const err = !ok && watch.getEmuError(name);
+		if (err) return res.json({ ok: false, text: err.message, log: true });
 		res.json({ ok: true, booted: ok, text: ok ? "Émulateur démarré" : "Démarrage en cours : il apparaîtra dans la grille dès qu'il est prêt (1 à 3 min, jusqu'à 15 min la toute première fois)" });
-	} catch (e) { res.json({ ok: false, text: String(e.message || e) }); }
+	} catch (e) {
+		watch.setEmuError(String(req.body.name), String(e.message || e));
+		res.json({ ok: false, text: String(e.message || e) });
+	}
 });
 app.post("/api/emulators/stop", async (req, res) => {
 	try {

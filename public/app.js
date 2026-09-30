@@ -826,7 +826,10 @@ async function loadEmulators() {
 	fill("#emuList", r.emulators.length ? r.emulators.map(e => h("li", {},
 		(() => { const c = h("input", { type: "checkbox", title: "Sélectionner", onchange: ev => { ev.target.checked ? emuSel.add(e.name) : emuSel.delete(e.name); paintEmuCount(); } }); c.checked = emuSel.has(e.name); return c; })(),
 		h("span", { class: "led " + (e.running ? "ok" : "") }),
-		h("div", { class: "grow" }, h("div", { class: "name" }, e.name.replace(/_/g, " ")), h("div", { class: "sub" }, e.running ? `allumé · ${e.serial}` : "éteint")),
+		h("div", { class: "grow" },
+			h("div", { class: "name" }, e.name.replace(/_/g, " ")),
+			h("div", { class: "sub" }, e.running ? `allumé · ${e.serial}` : "éteint"),
+			e.error ? h("div", { class: "emu-error" }, "⚠ " + e.error.message, " ", h("button", { class: "linkbtn", onclick: ev => { ev.stopPropagation(); showEmuLog(e.name); } }, "Voir le journal")) : null),
 		h("div", { class: "acts" }, e.running
 			? h("button", { class: "btn danger", onclick: () => emuAction("stop", e.name) }, "■ Arrêter")
 			: [h("button", { class: "btn", onclick: () => emuAction("start", e.name) }, "▶ Démarrer"),
@@ -877,7 +880,7 @@ async function pollNotes() {
 			if (n.kind === "ask") continue; // déjà affiché par la carte de confirmation
 			toast(`${n.title} — ${n.text}`, n.kind === "error" || n.kind === "warn");
 			if (document.hidden && pref("browserNotif") === "1" && "Notification" in window && Notification.permission === "granted") new Notification(`Prigojine · ${n.title}`, { body: n.text, tag: "prigojine-" + n.id });
-			if (/Émulateur|Appareil/.test(n.title)) { loadDevices(true); if ($("#tabs button.on")?.dataset.tab === "device") loadEmulators(); }
+			if (/mulateur|Appareil/i.test(n.title)) { loadDevices(true); if ($("#tabs button.on")?.dataset.tab === "device") loadEmulators(); }
 		}
 	} catch { /* serveur indisponible */ }
 }
@@ -889,11 +892,24 @@ $("#notifPerm").onclick = async () => {
 	toast(p === "granted" ? "Notifications activées pour quand la page est en arrière-plan" : "Notifications refusées par le navigateur", p !== "granted");
 };
 
+// Journal de démarrage d'un émulateur (messages bruts de l'émulateur, pour le diagnostic)
+async function showEmuLog(name) {
+	const text = await fetch(`/api/emulators/log?name=${encodeURIComponent(name)}`).then(r => r.text()).catch(e => e.message);
+	const box = h("div", { class: "log-modal", onclick: e => { if (e.target === box) box.remove(); } },
+		h("div", { class: "log-card" },
+			h("div", { class: "row" }, h("h3", { style: "margin:0;flex:1" }, `Journal de démarrage — ${name.replace(/_/g, " ")}`),
+				h("button", { class: "btn small", onclick: () => navigator.clipboard?.writeText(text).then(() => toast("Journal copié")) }, "Copier"),
+				h("button", { class: "btn small", onclick: () => box.remove() }, "Fermer")),
+			h("pre", { class: "pre" }, text)));
+	document.body.append(box);
+}
+
 async function emuAction(kind, name, cold = false) {
 	if (kind === "stop" && !confirm(`Arrêter l'émulateur ${name} ?`)) return;
 	toast(kind === "start" ? `Démarrage de ${name}…` : `Arrêt de ${name}…`);
 	const r = await post(`/api/emulators/${kind}`, { name, cold, light: !$("#emuWindow").checked });
 	toast(r.text || (r.ok ? "OK" : "Échec"), !r.ok);
+	if (!r.ok && r.log) showEmuLog(name);
 	await loadEmulators();
 	await loadDevices();
 }
